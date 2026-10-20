@@ -20,6 +20,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-001](#fc-001--trust-only-configured-reverse-proxies) | API | Client IP honors `X-Forwarded-For` only from `TRUSTED_PROXIES` | yes |
 | [FC-002](#fc-002--sign-ups-closed-by-default-after-the-first-account) | API, web | Sign-ups closed by default once an account exists; first sign-up race-free | yes |
 | [FC-003](#fc-003--clear-error-for-passwords-over-72-bytes) | API, web | Passwords over 72 bytes get a 400 with a reason instead of a 500 | yes |
+| [FC-004](#fc-004--allow-out-of-order-migrations-for-fork-migrations) | API | Goose applies migrations with `WithAllowMissing` (fork migrations use 10001+) | no |
 
 ## Details
 
@@ -50,3 +51,11 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** passwords of 73–128 bytes, which never worked, are now refused with a 400 and a reason. No existing password is affected.
 - **Upstreamable:** yes.
 - **Tests:** `TestValidatePassword` (bounds, multi-byte characters, hashing at the limit); `TestRegisterRejectsOverlongPassword` (73 bytes → 400 mentioning the limit, 72 bytes → 200).
+
+### FC-004 — Allow out-of-order migrations for fork migrations
+
+- **Why:** the fork adds its own database migrations. Numbering them after upstream (`00023`, …) would collide with upstream's next files, so fork migrations start at `10001`. Goose refuses by default to apply a migration whose version is lower than one already applied, so a later upstream `00023` would fail on a database that already has `10001`.
+- **What changed:** `app.migrate` calls `goose.Up(db, ".", goose.WithAllowMissing())`.
+- **Compatibility:** no effect on databases with only upstream migrations. Fork-only.
+- **Upstreamable:** no (only needed because of the fork's numbering).
+- **Tests:** `app/app_test.go`: the real migration set applies and is idempotent; a synthetic `00002` added after `10001` is refused without the option and applied with it. These tests need `CAL_TEST_DATABASE_URL` and skip without it.

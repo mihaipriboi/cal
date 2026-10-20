@@ -69,20 +69,7 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{"Content-Type", "Authorization"},
 		AllowOriginFunc: func(origin string) bool {
-			// Web origin stays explicit; Capacitor/Ionic webview schemes are
-			// app-only — browsers can't send them as Origin.
-			if origin == env("WEB_ORIGIN", "http://localhost:5173") {
-				return true
-			}
-			if strings.HasPrefix(origin, "capacitor://") || strings.HasPrefix(origin, "ionic://") {
-				return true
-			}
-			for _, p := range []string{"http://localhost", "https://localhost", "http://127.0.0.1", "https://127.0.0.1", "http://[::1]", "https://[::1]"} {
-				if strings.HasPrefix(origin, p) {
-					return true
-				}
-			}
-			return false
+			return allowedOrigin(origin, env("WEB_ORIGIN", "http://localhost:5173"))
 		},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -958,6 +945,33 @@ func securityHeaders() gin.HandlerFunc {
 		c.Header("Content-Security-Policy", "default-src 'self'")
 		c.Next()
 	}
+}
+
+// allowedOrigin is the CORS check. The web origin must match exactly;
+// Capacitor/Ionic webviews (capacitor://localhost, https://localhost) and
+// local dev servers on any port match by parsed host, never by prefix, so
+// http://localhost.example.com is not mistaken for localhost.
+func allowedOrigin(origin, webOrigin string) bool {
+	if origin == "" {
+		return false
+	}
+	if origin == webOrigin {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	switch u.Scheme {
+	case "capacitor", "ionic":
+		return u.Host == "localhost"
+	case "http", "https":
+		switch u.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+			return true
+		}
+	}
+	return false
 }
 
 // trustedProxies parses a comma-separated list of proxy IPs/CIDRs. Empty

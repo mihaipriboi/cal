@@ -80,3 +80,31 @@ func TestTrustedProxiesParsing(t *testing.T) {
 		t.Fatal("invalid IP accepted")
 	}
 }
+
+func TestAllowedOrigin(t *testing.T) {
+	const web = "https://cal.example.com"
+	cases := map[string]bool{
+		web:                                true,
+		"https://cal.example.com.evil.com": false,
+		"http://cal.example.com":           false,
+		"capacitor://localhost":            true,
+		"ionic://localhost":                true,
+		"capacitor://evil.com":             false,
+		"https://localhost":                true,
+		"http://localhost:5173":            true,
+		"http://127.0.0.1:8080":            true,
+		"http://[::1]:3000":                true,
+		"http://localhost.evil.com":        false,
+		"https://127.0.0.1.evil.com":       false,
+		"http://localhost@evil.com":        false,
+		"http://user@localhost":            false,
+		"null":                             false,
+		"":                                 false,
+		"file://localhost":                 false,
+	}
+	for origin, want := range cases {
+		if got := allowedOrigin(origin, web); got != want {
+			t.Errorf("allowedOrigin(%q) = %v, want %v", origin, got, want)
+		}
+	}
+}

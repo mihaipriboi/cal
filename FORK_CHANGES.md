@@ -24,6 +24,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-005](#fc-005--caldav-uids-scoped-per-account) | API, DB | CalDAV UIDs unique per account; sync never updates another user's row | yes |
 | [FC-006](#fc-006--html-mail-in-a-sandboxed-frame-csp-for-the-app-shell) | web, Android | HTML mail in a sandboxed iframe; CSP meta for the app shell; mail-password export needs a native confirmation | yes |
 | [FC-007](#fc-007--android-no-backups-https-only-no-default-keystore-password) | Android | App data excluded from backups; HTTPS only; no built-in keystore password | partly |
+| [FC-008](#fc-008--compose-builds-the-image-locally) | deploy | `docker-compose.yml` always builds the app image from the checkout | no |
 
 ## Details
 
@@ -105,3 +106,11 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - CI signing is unchanged (it already passes both env vars).
 - **Upstreamable:** partly. Backups and the keystore change, yes. HTTPS-only is a policy choice upstream may not want, since it drops support for plain-HTTP LAN servers.
 - **Tests:** `assembleDebug`, `assembleRelease` (unsigned without secrets) and `testDebugUnitTest` pass. `aapt2 dump` of the APK confirms the manifest flags.
+
+### FC-008 — Compose builds the image locally
+
+- **Why:** this fork is deployed from its own source. Upstream's compose file names `ghcr.io/dvorinka/cal:latest` with `pull_policy: missing`, so a plain `docker compose up -d` would run upstream's published image instead of the fork's code.
+- **What changed:** the `cal` service uses `image: cal-local:${CAL_TAG:-dev}` with `pull_policy: build`, so Compose always builds from the checkout. The header explains tagging per commit (`CAL_TAG=$(git rev-parse --short HEAD)`) to keep older builds for rollback. A commented `TRUSTED_PROXIES` example was added (see FC-001).
+- **Compatibility:** fork-only. `install.sh` is unchanged and still targets upstream (it downloads upstream's compose file and pulls its image). For the fork, use `docker compose up -d --build` from a checkout instead.
+- **Upstreamable:** no.
+- **Tests:** none possible without Docker on the dev machine; verify with `docker compose config` and `docker compose up -d --build` on the deploy host.

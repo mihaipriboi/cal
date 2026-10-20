@@ -416,12 +416,7 @@ public class CalMailPlugin extends Plugin {
         props.put("mail." + proto + ".timeout", "15000");
         props.put("mail." + proto + ".writetimeout", "15000");
         props.put("mail." + proto + ".auth", "true");
-        if (!ssl) props.put("mail." + proto + ".starttls.enable", "true");
-        // Same trust-override flag as IMAP — self-hosted mail, self-signed cert.
-        if (acct.optBoolean("insecure")) {
-            props.put("mail." + proto + ".ssl.trust", "*");
-            props.put("mail." + proto + ".ssl.checkserveridentity", "false");
-        }
+        MailUtil.tlsProps(props, proto, ssl, acct.optBoolean("insecure"));
         return props;
     }
 
@@ -444,13 +439,7 @@ public class CalMailPlugin extends Plugin {
         props.put("mail." + proto + ".connectiontimeout", "12000");
         props.put("mail." + proto + ".timeout", "15000");
         props.put("mail." + proto + ".writetimeout", "15000");
-        if (!ssl) props.put("mail.imap.starttls.enable", "true");
-        // Self-hosted mail often has a self-signed cert — the account flag
-        // opts that account into trust-all + no hostname check.
-        if (acct.optBoolean("insecure")) {
-            props.put("mail." + proto + ".ssl.trust", "*");
-            props.put("mail." + proto + ".ssl.checkserveridentity", "false");
-        }
+        MailUtil.tlsProps(props, proto, ssl, acct.optBoolean("insecure"));
         Store s = Session.getInstance(props).getStore(proto);
         s.connect(acct.optString("imapHost"), acct.optInt("imapPort", 993),
             acct.optString("username"), acct.optString("password"));

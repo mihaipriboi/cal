@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No cleartext HTTP: the Cal server, the widget fetch and mail all use TLS.
+     The app's own pages are served by the WebView itself, not the network. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

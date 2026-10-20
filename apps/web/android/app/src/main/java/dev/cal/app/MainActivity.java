@@ -33,6 +33,6 @@ public class MainActivity extends BridgeActivity {
             + (text.matches(".*https?://\\S+.*")
                 ? "&url=" + android.net.Uri.encode(text.replaceAll(".*?(https?://\\S+).*", "$1"))
                 : "");
-        bridge.getWebView().post(() -> bridge.getWebView().loadUrl("http://localhost/" + url));
+        bridge.getWebView().post(() -> bridge.getWebView().loadUrl(bridge.getLocalUrl() + "/" + url));
     }
 }

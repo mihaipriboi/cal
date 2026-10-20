@@ -23,6 +23,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-004](#fc-004--allow-out-of-order-migrations-for-fork-migrations) | API | Goose applies migrations with `WithAllowMissing` (fork migrations use 10001+) | no |
 | [FC-005](#fc-005--caldav-uids-scoped-per-account) | API, DB | CalDAV UIDs unique per account; sync never updates another user's row | yes |
 | [FC-006](#fc-006--html-mail-in-a-sandboxed-frame-csp-for-the-app-shell) | web, Android | HTML mail in a sandboxed iframe; CSP meta for the app shell; mail-password export needs a native confirmation | yes |
+| [FC-007](#fc-007--android-no-backups-https-only-no-default-keystore-password) | Android | App data excluded from backups; HTTPS only; no built-in keystore password | partly |
 
 ## Details
 
@@ -82,10 +83,25 @@ This file lists every change the fork makes to upstream code: what changed, why,
     - Remote images stay blocked until the reader clicks **Load remote images**, which is reset per message.
     - The regex sanitizer is removed.
   - **App-shell CSP** (`vite.config.ts`): the built `index.html` gets a `Content-Security-Policy` meta tag matching the server's policy, except `connect-src 'self' https:`, which native builds need to reach a user-chosen server. When the server header is present too, the browser enforces both. Build only, so the Vite dev server is unaffected.
-  - **Native export** (`CalMailPlugin.exportAccounts`): it now shows a native "Copy N mail accounts, including passwords, to <host>?" dialog and rejects with `cancelled` unless confirmed. The TS side passes the destination host and shows "Import cancelled".
+  - **Native export** (`CalMailPlugin.exportAccounts`): it now shows a native "Copy N mail accounts, including passwords, to HOST?" dialog and rejects with `cancelled` unless confirmed. The TS side passes the destination host and shows "Import cancelled".
 - **Compatibility:** the plugin method takes `{ destination }`; it's only called by the app's own import flow. Very long HTML mail now scrolls inside a fixed-height frame.
 - **Upstreamable:** yes.
 - **Tests:** `mailframe.test.ts` (CSP contents, no script permissions, remote-content detection). Also checked in headless Chromium with the real module and policy:
   - Six injection payloads (`onerror` after a slash, nested `<script>`, plain `<script>`, SVG `onbegin`, an entity-encoded `javascript:` link, meta refresh) are all inert.
   - No remote request is made until images are allowed, and then only the image loads.
   - The Android project compiles and its unit tests pass.
+
+### FC-007 — Android: no backups, HTTPS only, no default keystore password
+
+- **Why:** the Android shell allowed backups (the WebView storage holds the session token, and SharedPreferences hold the widget token and mail accounts), allowed cleartext HTTP everywhere, and `build.gradle` fell back to a hard-coded keystore password when the env vars were missing.
+- **What changed:**
+  - `AndroidManifest.xml`: `allowBackup="false"` and `fullBackupContent="false"`; new `res/xml/data_extraction_rules.xml` excludes all app data from cloud backup and device-to-device transfer on Android 12+; `usesCleartextTraffic` is replaced by `res/xml/network_security_config.xml` (`cleartextTrafficPermitted="false"`).
+  - `capacitor.config.ts`: `androidScheme` `"http"` → `"https"`. The http scheme existed to reach plain-HTTP servers without mixed-content errors.
+  - `MainActivity`: share deep links use `bridge.getLocalUrl()` instead of a hard-coded `http://localhost/`.
+  - `build.gradle`: release signing is configured only when `keystore/cal-release.jks` exists **and** `CAL_STORE_PASSWORD` and `CAL_KEY_PASSWORD` are set. Otherwise the release APK is built unsigned, with a warning if the keystore is present.
+- **Compatibility:**
+  - The Android app can no longer connect to a plain-HTTP server; HTTPS is required.
+  - Changing the scheme changes the WebView origin, so an existing install starts with empty local storage and needs to sign in again.
+  - CI signing is unchanged (it already passes both env vars).
+- **Upstreamable:** partly. Backups and the keystore change, yes. HTTPS-only is a policy choice upstream may not want, since it drops support for plain-HTTP LAN servers.
+- **Tests:** `assembleDebug`, `assembleRelease` (unsigned without secrets) and `testDebugUnitTest` pass. `aapt2 dump` of the APK confirms the manifest flags.

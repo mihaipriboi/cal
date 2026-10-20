@@ -108,3 +108,51 @@ func TestAllowedOrigin(t *testing.T) {
 		}
 	}
 }
+
+func TestRequireClientNet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	nets, err := parseNets("192.168.1.0/24, 10.6.0.0/24, 2001:db8::5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseNets("192.168.1.0/33"); err == nil {
+		t.Fatal("bad CIDR accepted")
+	}
+	r := gin.New()
+	if err := r.SetTrustedProxies([]string{"192.168.1.10"}); err != nil {
+		t.Fatal(err)
+	}
+	r.GET("/mail", requireClientNet(nets, "local only"), func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+	open := gin.New()
+	open.GET("/mail", requireClientNet(nil, "local only"), func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	cases := []struct {
+		remote, xff string
+		want        int
+	}{
+		{"192.168.1.50:1234", "", http.StatusOK},                   // LAN client, direct
+		{"192.168.1.10:1234", "10.6.0.3", http.StatusOK},           // VPN client via NPM
+		{"192.168.1.10:1234", "203.0.113.9", http.StatusForbidden}, // internet via NPM
+		// Spoofed LAN entry to the left of the real client is ignored.
+		{"192.168.1.10:1234", "192.168.1.77, 203.0.113.9", http.StatusForbidden},
+		{"203.0.113.9:1234", "192.168.1.77", http.StatusForbidden}, // untrusted peer's XFF ignored
+		{"[2001:db8::5]:1234", "", http.StatusOK},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/mail", nil)
+		req.RemoteAddr = tc.remote
+		if tc.xff != "" {
+			req.Header.Set("X-Forwarded-For", tc.xff)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != tc.want {
+			t.Errorf("remote=%s xff=%q: got %d, want %d", tc.remote, tc.xff, w.Code, tc.want)
+		}
+		w = httptest.NewRecorder()
+		open.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("unset nets should allow all, got %d", w.Code)
+		}
+	}
+}

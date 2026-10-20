@@ -166,16 +166,21 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 	authed.GET("/filters", server.listFilters)
 	authed.POST("/filters", server.createFilter)
 	authed.DELETE("/filters/:id", server.deleteFilter)
-	authed.GET("/mail/accounts", server.listMailAccounts)
-	authed.POST("/mail/accounts", server.createMailAccount)
-	authed.DELETE("/mail/accounts/:id", server.deleteMailAccount)
-	authed.POST("/mail/accounts/:id/test", server.testMailAccount)
-	authed.GET("/mail/:id/mailboxes", server.mailMailboxes)
-	authed.GET("/mail/:id/messages", server.mailMessages)
-	authed.GET("/mail/:id/message/:uid", server.mailMessage)
-	authed.POST("/mail/:id/message/:uid/flag", server.mailFlag)
-	authed.DELETE("/mail/:id/message/:uid", server.mailDelete)
-	authed.POST("/mail/:id/send", server.mailSend)
+	mailNets, err := parseNets(os.Getenv("MAIL_ALLOWED_NETS"))
+	if err != nil {
+		log.Fatalf("MAIL_ALLOWED_NETS: %v", err)
+	}
+	mailAPI := authed.Group("/mail", requireClientNet(mailNets, "Mail is only available from your local network or VPN"))
+	mailAPI.GET("/accounts", server.listMailAccounts)
+	mailAPI.POST("/accounts", server.createMailAccount)
+	mailAPI.DELETE("/accounts/:id", server.deleteMailAccount)
+	mailAPI.POST("/accounts/:id/test", server.testMailAccount)
+	mailAPI.GET("/:id/mailboxes", server.mailMailboxes)
+	mailAPI.GET("/:id/messages", server.mailMessages)
+	mailAPI.GET("/:id/message/:uid", server.mailMessage)
+	mailAPI.POST("/:id/message/:uid/flag", server.mailFlag)
+	mailAPI.DELETE("/:id/message/:uid", server.mailDelete)
+	mailAPI.POST("/:id/send", server.mailSend)
 	authed.GET("/github/inbox", server.githubInbox)
 	authed.GET("/github/activity", server.githubActivity)
 	authed.POST("/github/import", server.githubImport)
@@ -972,6 +977,51 @@ func allowedOrigin(origin, webOrigin string) bool {
 		}
 	}
 	return false
+}
+
+// parseNets turns a comma-separated list of IPs/CIDRs into networks; a bare
+// IP becomes a single-host network. Empty input returns nil.
+func parseNets(raw string) ([]*net.IPNet, error) {
+	entries, err := trustedProxies(raw)
+	if err != nil {
+		return nil, err
+	}
+	var nets []*net.IPNet
+	for _, e := range entries {
+		if !strings.Contains(e, "/") {
+			ip := net.ParseIP(e)
+			bits := 128
+			if ip.To4() != nil {
+				ip, bits = ip.To4(), 32
+			}
+			nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			continue
+		}
+		_, n, _ := net.ParseCIDR(e)
+		nets = append(nets, n)
+	}
+	return nets, nil
+}
+
+// requireClientNet rejects requests whose ClientIP() (which honors
+// TRUSTED_PROXIES) is outside nets. No nets configured means no restriction.
+func requireClientNet(nets []*net.IPNet, msg string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if len(nets) == 0 {
+			c.Next()
+			return
+		}
+		if ip := net.ParseIP(c.ClientIP()); ip != nil {
+			for _, n := range nets {
+				if n.Contains(ip) {
+					c.Next()
+					return
+				}
+			}
+		}
+		c.String(http.StatusForbidden, msg)
+		c.Abort()
+	}
 }
 
 // trustedProxies parses a comma-separated list of proxy IPs/CIDRs. Empty

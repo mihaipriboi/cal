@@ -1,6 +1,7 @@
 package dev.cal.app;
 
 import android.content.Context;
+import androidx.appcompat.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
@@ -160,10 +161,38 @@ public class CalMailPlugin extends Plugin {
         });
     }
 
-    /** Full records incl. passwords — exists for the server-import path only. */
+    /**
+     * Full records incl. passwords — exists for the server-import path only.
+     * Requires an explicit tap on a native dialog, so page script alone can
+     * never read stored passwords.
+     */
     @PluginMethod
     public void exportAccounts(PluginCall call) {
-        run(call, () -> new JSObject().put("accounts", new JSArray(accounts().load().toString())));
+        String destination = call.getString("destination", "");
+        io.execute(() -> {
+            int count;
+            try {
+                count = accounts().load().length();
+            } catch (Exception e) {
+                call.reject("could not read accounts", e);
+                return;
+            }
+            if (count == 0) {
+                call.resolve(new JSObject().put("accounts", new JSArray()));
+                return;
+            }
+            String where = destination == null || destination.isEmpty() ? "your Cal server" : destination;
+            String message = "Copy " + count + (count == 1 ? " mail account" : " mail accounts")
+                + ", including passwords, to " + where + "?";
+            getActivity().runOnUiThread(() -> new AlertDialog.Builder(getActivity())
+                .setTitle("Copy mail accounts?")
+                .setMessage(message)
+                .setNegativeButton("Cancel", (d, w) -> call.reject("cancelled"))
+                .setPositiveButton("Copy", (d, w) ->
+                    run(call, () -> new JSObject().put("accounts", new JSArray(accounts().load().toString()))))
+                .setOnCancelListener(d -> call.reject("cancelled"))
+                .show());
+        });
     }
 
     // --- Mailbox + message reads ---

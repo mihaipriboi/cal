@@ -22,6 +22,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-003](#fc-003--clear-error-for-passwords-over-72-bytes) | API, web | Passwords over 72 bytes get a 400 with a reason instead of a 500 | yes |
 | [FC-004](#fc-004--allow-out-of-order-migrations-for-fork-migrations) | API | Goose applies migrations with `WithAllowMissing` (fork migrations use 10001+) | no |
 | [FC-005](#fc-005--caldav-uids-scoped-per-account) | API, DB | CalDAV UIDs unique per account; sync never updates another user's row | yes |
+| [FC-006](#fc-006--html-mail-in-a-sandboxed-frame-csp-for-the-app-shell) | web, Android | HTML mail in a sandboxed iframe; CSP meta for the app shell; mail-password export needs a native confirmation | yes |
 
 ## Details
 
@@ -70,3 +71,21 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** no data change; the new index is strictly looser than the old one. The down migration restores the old index and fails if duplicate UIDs now exist across accounts.
 - **Upstreamable:** yes. The migration would be renumbered into upstream's sequence.
 - **Tests:** `TestCaldavUIDScopedPerAccount`: same UID across users and across one user's accounts gives separate rows; re-sync updates in place; a write naming another user's account leaves their row untouched. The test helper gained `newTestStore`.
+
+### FC-006 — HTML mail in a sandboxed frame, CSP for the app shell
+
+- **Why:** HTML mail was injected into the app's own DOM after a regex clean-up that well-known markup gets past, e.g. `<img src="x"/onerror=…>` or entity-encoded `javascript:`. On the web the server's CSP blocked inline script. The Android/iOS WebView has no CSP, though, so a crafted message could run script with access to the native mail plugin, including its export of stored mail passwords. Remote images in mail also loaded on open, which lets senders track reads.
+- **What changed:**
+  - **Mail rendering** (`MailPage.tsx`, new `lib/mailframe.ts`):
+    - HTML mail renders in `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc=…>`, with no `allow-scripts` and no `allow-same-origin`, so it runs with an opaque origin.
+    - The frame document carries its own CSP (`default-src 'none'; img-src data: cid:`), plus `<base target="_blank">` and `no-referrer`.
+    - Remote images stay blocked until the reader clicks **Load remote images**, which is reset per message.
+    - The regex sanitizer is removed.
+  - **App-shell CSP** (`vite.config.ts`): the built `index.html` gets a `Content-Security-Policy` meta tag matching the server's policy, except `connect-src 'self' https:`, which native builds need to reach a user-chosen server. When the server header is present too, the browser enforces both. Build only, so the Vite dev server is unaffected.
+  - **Native export** (`CalMailPlugin.exportAccounts`): it now shows a native "Copy N mail accounts, including passwords, to <host>?" dialog and rejects with `cancelled` unless confirmed. The TS side passes the destination host and shows "Import cancelled".
+- **Compatibility:** the plugin method takes `{ destination }`; it's only called by the app's own import flow. Very long HTML mail now scrolls inside a fixed-height frame.
+- **Upstreamable:** yes.
+- **Tests:** `mailframe.test.ts` (CSP contents, no script permissions, remote-content detection). Also checked in headless Chromium with the real module and policy:
+  - Six injection payloads (`onerror` after a slash, nested `<script>`, plain `<script>`, SVG `onbegin`, an entity-encoded `javascript:` link, meta refresh) are all inert.
+  - No remote request is made until images are allowed, and then only the image loads.
+  - The Android project compiles and its unit tests pass.

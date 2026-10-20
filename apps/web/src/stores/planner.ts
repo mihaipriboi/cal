@@ -211,7 +211,14 @@ export const usePlanner = create<PlannerState>((set, get) => ({
 
   async importLocalAccounts() {
     try {
-      const [local, remote] = await Promise.all([nativeMail.exportAccounts(), get().api.mailAccounts()]);
+      // The native side asks the user before handing over passwords.
+      let destination = "your Cal server";
+      try {
+        destination = new URL(localStorage.getItem("cal:server") || window.location.origin).host;
+      } catch {
+        // keep the generic label
+      }
+      const [local, remote] = await Promise.all([nativeMail.exportAccounts(destination), get().api.mailAccounts()]);
       const seen = new Set(remote.map((a) => `${a.email}|${a.imapHost}|${a.imapPort}`));
       let imported = 0, failed = 0;
       for (const a of local) {
@@ -234,7 +241,8 @@ export const usePlanner = create<PlannerState>((set, get) => ({
           : "No new mail accounts to import",
       );
     } catch (error) {
-      get().toast(error instanceof Error ? error.message : "Import failed");
+      const message = error instanceof Error ? error.message : "Import failed";
+      get().toast(message === "cancelled" ? "Import cancelled" : message);
     }
   },
 

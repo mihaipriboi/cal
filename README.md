@@ -158,6 +158,7 @@ All configuration is via environment variables:
 | `DATABASE_URL` | unset → embedded PG | external Postgres DSN |
 | `SESSION_SECURE` | `false` | set `true` behind HTTPS |
 | `WEB_ORIGIN` | unset | extra CORS origin for the web app |
+| `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` is honored (e.g. `10.0.0.5`). Unset trusts none, so the client IP is the connecting peer |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | enable Google Calendar sync |
 | `CAL_ALLOW_PRIVATE_FEEDS` / `CAL_ALLOW_PRIVATE_WEBHOOKS` | unset | allow private/LAN URLs (SSRF guard off) |
 

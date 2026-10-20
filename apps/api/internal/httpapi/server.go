@@ -266,7 +266,15 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 
 func (s *Server) register(c *gin.Context) {
 	var input authRequest
-	if !bind(c, &input) || !validAuth(input) {
+	if !bind(c, &input) {
+		c.String(http.StatusBadRequest, "invalid email or password")
+		return
+	}
+	if err := auth.ValidatePassword(input.Password); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if !validAuth(input) {
 		c.String(http.StatusBadRequest, "invalid email or password")
 		return
 	}
@@ -915,8 +923,12 @@ func (s *Server) changePassword(c *gin.Context) {
 		Current  string `json:"current"`
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil || len(body.Password) < 8 || len(body.Password) > 128 {
-		c.String(http.StatusBadRequest, "password must be 8-128 characters")
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid request")
+		return
+	}
+	if err := auth.ValidatePassword(body.Password); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 	user, hash, err := s.store.UserByEmail(c.Request.Context(), currentUser(c).Email)

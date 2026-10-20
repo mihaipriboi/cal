@@ -456,8 +456,12 @@ func (s *Server) resetPassword(c *gin.Context) {
 		Token    string `json:"token"`
 		Password string `json:"password"`
 	}
-	if !bind(c, &body) || len(body.Password) < 8 || len(body.Token) != 64 {
+	if !bind(c, &body) || len(body.Token) != 64 {
 		c.String(http.StatusBadRequest, "invalid request")
+		return
+	}
+	if err := auth.ValidatePassword(body.Password); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 	hash := sha256.Sum256([]byte(body.Token))

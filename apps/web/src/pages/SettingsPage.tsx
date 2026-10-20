@@ -1141,6 +1141,7 @@ export function SettingsPage() {
               className="input"
               type="password"
               placeholder="New password (8+ chars)"
+              maxLength={72}
               value={pwNext}
               onChange={(e) => setPwNext(e.target.value)}
             />

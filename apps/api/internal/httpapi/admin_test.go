@@ -159,3 +159,19 @@ func TestConcurrentFirstRegistration(t *testing.T) {
 		t.Fatalf("want 1 success and %d refusals, got %d / %d", n-1, ok, forbidden)
 	}
 }
+
+// bcrypt caps input at 72 bytes; longer passwords get a 400 with a reason,
+// not a 500 from the hasher.
+func TestRegisterRejectsOverlongPassword(t *testing.T) {
+	srv := newEmptyTestServer(t)
+	code, body := doJSONStatus(t, srv, http.MethodPost, "/api/auth/register",
+		`{"email":"long@cal.local","password":"`+strings.Repeat("a", 73)+`"}`, "")
+	if code != http.StatusBadRequest || !strings.Contains(body, "72 bytes") {
+		t.Fatalf("73-byte password: got %d %q", code, body)
+	}
+	code, body = doJSONStatus(t, srv, http.MethodPost, "/api/auth/register",
+		`{"email":"long@cal.local","password":"`+strings.Repeat("a", 72)+`"}`, "")
+	if code != http.StatusOK {
+		t.Fatalf("72-byte password: got %d %q", code, body)
+	}
+}

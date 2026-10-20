@@ -19,6 +19,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | --- | --- | --- | --- |
 | [FC-001](#fc-001--trust-only-configured-reverse-proxies) | API | Client IP honors `X-Forwarded-For` only from `TRUSTED_PROXIES` | yes |
 | [FC-002](#fc-002--sign-ups-closed-by-default-after-the-first-account) | API, web | Sign-ups closed by default once an account exists; first sign-up race-free | yes |
+| [FC-003](#fc-003--clear-error-for-passwords-over-72-bytes) | API, web | Passwords over 72 bytes get a 400 with a reason instead of a 500 | yes |
 
 ## Details
 
@@ -41,3 +42,11 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** behavior change for existing instances whose admin never touched the toggle: sign-ups are now closed until the toggle is turned on. Fresh instances still accept their first account.
 - **Upstreamable:** yes.
 - **Tests:** the admin test checks default-closed (403), then opening; new `TestConcurrentFirstRegistration` (6 parallel first sign-ups → exactly one admin, the rest 403). The test helper gained `newEmptyTestServer` and `openRegistration`; the shopping test opens registration before adding its second user.
+
+### FC-003 — Clear error for passwords over 72 bytes
+
+- **Why:** bcrypt rejects input longer than 72 bytes. Registration and password change allowed up to 128 characters, so a long passphrase failed inside the hasher and surfaced as a generic 500.
+- **What changed:** new `auth.ValidatePassword` (at least 8 characters, at most 72 bytes, with user-facing messages) used by register, change password and reset password. Login is unchanged, since an over-long password simply doesn't match. The new-password inputs in the web app get `maxLength={72}`.
+- **Compatibility:** passwords of 73–128 bytes, which never worked, are now refused with a 400 and a reason. No existing password is affected.
+- **Upstreamable:** yes.
+- **Tests:** `TestValidatePassword` (bounds, multi-byte characters, hashing at the limit); `TestRegisterRejectsOverlongPassword` (73 bytes → 400 mentioning the limit, 72 bytes → 200).

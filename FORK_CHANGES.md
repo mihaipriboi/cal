@@ -21,6 +21,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-002](#fc-002--sign-ups-closed-by-default-after-the-first-account) | API, web | Sign-ups closed by default once an account exists; first sign-up race-free | yes |
 | [FC-003](#fc-003--clear-error-for-passwords-over-72-bytes) | API, web | Passwords over 72 bytes get a 400 with a reason instead of a 500 | yes |
 | [FC-004](#fc-004--allow-out-of-order-migrations-for-fork-migrations) | API | Goose applies migrations with `WithAllowMissing` (fork migrations use 10001+) | no |
+| [FC-005](#fc-005--caldav-uids-scoped-per-account) | API, DB | CalDAV UIDs unique per account; sync never updates another user's row | yes |
 
 ## Details
 
@@ -59,3 +60,13 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** no effect on databases with only upstream migrations. Fork-only.
 - **Upstreamable:** no (only needed because of the fork's numbering).
 - **Tests:** `app/app_test.go`: the real migration set applies and is idempotent; a synthetic `00002` added after `10001` is refused without the option and applied with it. These tests need `CAL_TEST_DATABASE_URL` and skip without it.
+
+### FC-005 — CalDAV UIDs scoped per account
+
+- **Why:** `entries.external_uid` had a global unique index, and the CalDAV pull upsert keyed on it alone. The same event in two calendars (two accounts, same UID) collided. With more than one user, one account's sync could overwrite another user's entry that happened to share a UID.
+- **What changed:**
+  - Migration `10001_caldav_uid_per_account.sql` replaces `entries_external_uid_key` with a unique index on `(account_id, external_uid)`.
+  - `UpsertSyncedEntry` targets that index and only updates when the existing row belongs to the same user.
+- **Compatibility:** no data change; the new index is strictly looser than the old one. The down migration restores the old index and fails if duplicate UIDs now exist across accounts.
+- **Upstreamable:** yes. The migration would be renumbered into upstream's sequence.
+- **Tests:** `TestCaldavUIDScopedPerAccount`: same UID across users and across one user's accounts gives separate rows; re-sync updates in place; a write naming another user's account leaves their row untouched. The test helper gained `newTestStore`.

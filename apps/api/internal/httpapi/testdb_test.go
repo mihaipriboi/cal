@@ -60,9 +60,8 @@ func testDatabaseURL(t *testing.T) string {
 	return testPGURL
 }
 
-// newEmptyTestServer creates a fresh database on the shared instance,
-// migrates it, and serves the real router over httptest. No users exist.
-func newEmptyTestServer(t *testing.T) *httptest.Server {
+// newTestStore creates a fresh, migrated database on the shared instance.
+func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	base := testDatabaseURL(t)
 
@@ -110,9 +109,16 @@ func newEmptyTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	return store.New(pool)
+}
 
+// newEmptyTestServer serves the real router over httptest on a fresh
+// database. No users exist.
+func newEmptyTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	st := newTestStore(t)
 	t.Setenv("DATA_DIR", t.TempDir())
-	router := New(store.New(pool), calendar.NewHolidayCache())
+	router := New(st, calendar.NewHolidayCache())
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv

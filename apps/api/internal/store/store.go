@@ -1208,15 +1208,18 @@ func (s *Store) AccountEntries(ctx context.Context, userID, accountID string) ([
 
 // UpsertSyncedEntry inserts or refreshes a pulled remote event. The caller
 // supplies the full row; dirty stays false since the remote is authoritative.
+// UIDs are unique per account, and an update only ever touches the caller's
+// own row.
 func (s *Store) UpsertSyncedEntry(ctx context.Context, userID, accountID string, e Entry) error {
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO entries (id, user_id, title, content, type, date, start_time, end_time, color, external_uid, external_href, external_etag, account_id)
 		VALUES ($1, $2, $3, $4, 'event', $5, nullif($6, '')::time, nullif($7, '')::time, $8, $9, $10, $11, $12)
-		ON CONFLICT (external_uid) WHERE external_uid IS NOT NULL DO UPDATE SET
+		ON CONFLICT (account_id, external_uid) WHERE external_uid IS NOT NULL DO UPDATE SET
 			title = EXCLUDED.title, content = EXCLUDED.content, date = EXCLUDED.date,
 			start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time,
 			external_href = EXCLUDED.external_href, external_etag = EXCLUDED.external_etag,
 			dirty = false
+		WHERE entries.user_id = EXCLUDED.user_id
 	`, e.ID, userID, e.Title, e.Content, e.Date, strOrEmpty(e.StartTime), strOrEmpty(e.EndTime), e.Color,
 		e.ExternalUID, e.ExternalHref, e.ExternalETag, accountID)
 	return err

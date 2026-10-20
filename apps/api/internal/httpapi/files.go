@@ -179,8 +179,7 @@ func (s *Server) serveSharedFile(c *gin.Context) {
 		c.String(http.StatusNotFound, "file gone")
 		return
 	}
-	c.Header("Content-Disposition", `inline; filename="`+strings.NewReplacer(`"`, "", "\r", "", "\n", "").Replace(f.OrigName)+`"`)
-	c.File(path)
+	serveUpload(c, path, f.OrigName)
 }
 
 // dirSize totals a directory (one level — uploads are flat per user).
@@ -219,5 +218,53 @@ func (s *Server) serveFile(c *gin.Context) {
 		return
 	}
 	path := filepath.Join(s.dataDir, "uploads", currentUser(c).ID, name)
+	if _, err := os.Stat(path); err != nil {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+	serveUpload(c, path, name)
+}
+
+// inlineTypes are sniffed types safe to render on the app origin: images,
+// media, PDF and plain text. Anything else (HTML, SVG, XML, scripts) is
+// served as an opaque download so an uploaded file can never run as the app.
+var inlineTypes = map[string]bool{
+	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
+	"image/bmp": true, "image/x-icon": true,
+	"video/mp4": true, "video/webm": true, "audio/mpeg": true, "audio/wave": true,
+	"audio/ogg": true, "application/ogg": true, "audio/aiff": true,
+	"application/pdf": true, "text/plain": true,
+}
+
+// uploadCSP sandboxes inline uploads: no scripts, no same-origin access.
+// PDFs skip it because browsers refuse to run their PDF viewer in a sandbox.
+const uploadCSP = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
+
+// serveUpload picks the Content-Type from the file's bytes, not its name or
+// stored MIME, and forces a download for anything outside inlineTypes.
+func serveUpload(c *gin.Context, path, filename string) {
+	f, err := os.Open(path)
+	if err != nil {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	f.Close()
+	mime, _, _ := strings.Cut(http.DetectContentType(head[:n]), ";")
+	disposition := "inline"
+	switch {
+	case !inlineTypes[mime]:
+		mime, disposition = "application/octet-stream", "attachment"
+	case mime == "text/plain":
+		mime = "text/plain; charset=utf-8"
+	}
+	if mime != "application/pdf" {
+		c.Header("Content-Security-Policy", uploadCSP)
+	}
+	safeName := strings.NewReplacer(`"`, "", `\`, "", "\r", "", "\n", "").Replace(filename)
+	c.Header("Content-Type", mime)
+	c.Header("Content-Disposition", disposition+`; filename="`+safeName+`"`)
+	c.Header("X-Content-Type-Options", "nosniff")
 	c.File(path)
 }

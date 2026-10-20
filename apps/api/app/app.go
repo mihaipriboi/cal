@@ -53,7 +53,10 @@ func migrate(databaseURL string) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
-	return goose.Up(db, ".")
+	// WithAllowMissing: fork-only migrations are numbered 10001+, so a later
+	// upstream 000NN file sorts below versions already applied. Goose would
+	// otherwise refuse to run it as "missing".
+	return goose.Up(db, ".", goose.WithAllowMissing())
 }
 
 // caldavLoop syncs every connected account every 15 minutes.

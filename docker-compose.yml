@@ -3,6 +3,9 @@
 #   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
 #   docker compose up -d --build
 #
+# The cal image is built locally from this checkout (tag it per commit with
+# CAL_TAG=$(git rev-parse --short HEAD) to keep old builds for rollback).
+#
 # App serves http://localhost:8080 (UI + API). Two volumes: cal-pg holds the
 # database, cal-data holds uploads and backups — back up both. Rather run a
 # single container? The image has embedded Postgres: drop DATABASE_URL and
@@ -11,15 +14,16 @@
 
 services:
   cal:
-    # `docker compose up -d` pulls the release image; `--build` builds locally.
+    # Always built from this checkout; never pulled from a registry.
     build: .
-    image: ghcr.io/dvorinka/cal:${CAL_VERSION:-latest}
-    pull_policy: missing
+    image: cal-local:${CAL_TAG:-dev}
+    pull_policy: build
     environment:
       DATABASE_URL: postgres://cal:${POSTGRES_PASSWORD:?put POSTGRES_PASSWORD in .env}@db:5432/cal?sslmode=disable
       SESSION_SECURE: "false" # set true when serving over https
       PORT: "8080"
       GIN_MODE: release
+      # TRUSTED_PROXIES: 10.0.0.5 # reverse proxy IP(s) whose X-Forwarded-For to honor
       # TZ: Europe/Prague
     ports:
       - "${PORT:-8080}:8080"

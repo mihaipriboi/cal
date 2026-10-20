@@ -72,7 +72,8 @@ interface CalMailPlugin {
   addAccount(input: MailAccountInput): Promise<{ account: MailAccount }>;
   removeAccount(input: { id: string }): Promise<void>;
   testAccount(input: { id: string }): Promise<{ ok: boolean }>;
-  exportAccounts(): Promise<{ accounts: (MailAccountInput & { id: string })[] }>;
+  /** Native confirmation dialog first; rejects with "cancelled" if declined. */
+  exportAccounts(input: { destination: string }): Promise<{ accounts: (MailAccountInput & { id: string })[] }>;
   mailboxes(input: { id: string }): Promise<{ mailboxes: { name: string; delimiter: string }[] }>;
   messages(input: { id: string; mailbox: string; page: number }): Promise<{ total: number; messages: MailSummary[] }>;
   message(input: { id: string; mailbox: string; uid: number }): Promise<MailMessage>;
@@ -103,7 +104,7 @@ export function fileToBase64(file: File): Promise<string> {
 }
 
 export interface NativeMailBackend extends MailBackend {
-  exportAccounts(): Promise<(MailAccountInput & { id: string })[]>;
+  exportAccounts(destination: string): Promise<(MailAccountInput & { id: string })[]>;
 }
 
 export const nativeMail: NativeMailBackend = {
@@ -117,7 +118,7 @@ export const nativeMail: NativeMailBackend = {
   testAccount: async (id) => {
     await plugin.testAccount({ id });
   },
-  exportAccounts: async () => (await plugin.exportAccounts()).accounts,
+  exportAccounts: async (destination) => (await plugin.exportAccounts({ destination })).accounts,
   mailboxes: async (id) => (await plugin.mailboxes({ id })).mailboxes,
   messages: (id, mailbox, page = 0) => plugin.messages({ id, mailbox, page }),
   message: (id, uid, mailbox) => plugin.message({ id, mailbox, uid }),

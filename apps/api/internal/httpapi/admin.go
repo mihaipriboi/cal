@@ -114,13 +114,13 @@ func (s *Server) adminUpdateConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"allowRegistration": *input.AllowRegistration})
 }
 
-// registrationClosed reports whether the register endpoint should refuse:
-// the first account always gets in (it becomes admin); afterwards the
-// instance policy applies.
+// registrationClosed is the fast-path check before hashing: the first account
+// always gets in (it becomes admin); afterwards the instance policy applies.
+// CreateUser re-checks under a lock, so this only saves work.
 func (s *Server) registrationClosed(c *gin.Context) bool {
 	count, err := s.store.UserCount(c.Request.Context())
 	if err != nil {
-		return false // fail open — a broken count must not lock out bootstrap
+		return true // fail closed
 	}
 	return count > 0 && !s.store.AllowRegistration(c.Request.Context())
 }

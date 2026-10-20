@@ -16,20 +16,29 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing needs the keystore AND both passwords from the
+    // environment; there is no built-in fallback password. Without them the
+    // release APK is built unsigned.
+    def releaseKeystore = file('keystore/cal-release.jks')
+    def storePass = System.getenv('CAL_STORE_PASSWORD')
+    def keyPass = System.getenv('CAL_KEY_PASSWORD')
+    def canSignRelease = releaseKeystore.exists() && storePass && keyPass
+    if (releaseKeystore.exists() && !canSignRelease) {
+        logger.warn("keystore/cal-release.jks found but CAL_STORE_PASSWORD/CAL_KEY_PASSWORD unset: release APK will be unsigned")
+    }
     signingConfigs {
         release {
-            def ks = file('keystore/cal-release.jks')
-            if (ks.exists()) {
-                storeFile ks
-                storePassword System.getenv('CAL_STORE_PASSWORD') ?: 'cal-release-2026'
+            if (canSignRelease) {
+                storeFile releaseKeystore
+                storePassword storePass
                 keyAlias 'cal'
-                keyPassword System.getenv('CAL_KEY_PASSWORD') ?: 'cal-release-2026'
+                keyPassword keyPass
             }
         }
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig canSignRelease ? signingConfigs.release : null
 
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

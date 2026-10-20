@@ -8,10 +8,9 @@ const config: CapacitorConfig = {
   appName: "Cal",
   webDir: "dist",
   server: {
-    // http origin so the app can talk to plain-HTTP self-hosted servers —
-    // with the default https scheme the webview blocks those fetches as
-    // mixed content.
-    androidScheme: "http",
+    // https origin; the server must be reachable over HTTPS (cleartext is
+    // blocked by res/xml/network_security_config.xml).
+    androidScheme: "https",
   },
   android: {
     allowMixedContent: false,

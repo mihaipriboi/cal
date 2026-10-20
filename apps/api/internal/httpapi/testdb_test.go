@@ -60,10 +60,8 @@ func testDatabaseURL(t *testing.T) string {
 	return testPGURL
 }
 
-// newTestServer creates a fresh database on the shared instance, migrates it,
-// and serves the real router over httptest. Returns the server and a session
-// token for the registered test user.
-func newTestServer(t *testing.T) (*httptest.Server, string) {
+// newTestStore creates a fresh, migrated database on the shared instance.
+func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	base := testDatabaseURL(t)
 
@@ -111,12 +109,26 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 		t.Fatalf("pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	return store.New(pool)
+}
 
+// newEmptyTestServer serves the real router over httptest on a fresh
+// database. No users exist.
+func newEmptyTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	st := newTestStore(t)
 	t.Setenv("DATA_DIR", t.TempDir())
-	router := New(store.New(pool), calendar.NewHolidayCache())
+	router := New(st, calendar.NewHolidayCache())
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
+	return srv
+}
 
+// newTestServer is newEmptyTestServer plus a registered first user (admin).
+// Returns the server and that user's session token.
+func newTestServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	srv := newEmptyTestServer(t)
 	// Register a user; the session id doubles as a bearer token.
 	resp := doJSON(t, srv, http.MethodPost, "/api/auth/register", `{"email":"t@cal.local","password":"test-pass-123"}`, "")
 	var reg struct {
@@ -126,6 +138,12 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 		t.Fatalf("register: %s", resp)
 	}
 	return srv, reg.Session
+}
+
+// openRegistration lets further sign-ups in; it's closed once a user exists.
+func openRegistration(t *testing.T, srv *httptest.Server, adminSession string) {
+	t.Helper()
+	doJSON(t, srv, http.MethodPut, "/api/admin/config", `{"allowRegistration":true}`, adminSession)
 }
 
 // doJSON sends a request; session "" = anonymous.

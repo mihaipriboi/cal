@@ -9,6 +9,7 @@ import { Inbox, Mail, Paperclip, PenSquare, Plus, RefreshCw, Send, Trash2 } from
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { mailBackend, type MailBackend } from "../lib/mail";
+import { hasRemoteContent, MAIL_FRAME_SANDBOX, mailFrameDoc } from "../lib/mailframe";
 import { reportErr, usePlanner } from "../stores/planner";
 
 export function MailPage() {
@@ -238,12 +239,7 @@ export function MailPage() {
               {reading.text ? (
                 <pre className="mail-text">{reading.text}</pre>
               ) : (
-                // Server returns raw HTML; sandbox it inside an iframe-less
-                // viewer by stripping scripts before render.
-                <div
-                  className="mail-text mail-html"
-                  dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(reading.html) }}
-                />
+                <MailHtml key={reading.uid} html={reading.html} />
               )}
             </div>
           )}
@@ -266,16 +262,30 @@ export function MailPage() {
   );
 }
 
-// Naive sanitiser for mail HTML: drop scripts/iframes/objects and on* attrs.
-// jarvis: ceiling — a real sanitizer (DOMPurify) if HTML mail gets heavy.
-function sanitizeMailHtml(html: string): string {
-  return html
-    .replace(/<(script|iframe|object|embed|form)[\s\S]*?<\/\1>/gi, "")
-    .replace(/<(script|iframe|object|embed|form)[^>]*\/?>/gi, "")
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
-    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
-    .replace(/javascript:/gi, "");
+// HTML mail renders in a sandboxed iframe (see lib/mailframe). Remote images
+// load only after the reader asks; keyed by uid so each message starts blocked.
+function MailHtml({ html }: { html: string }) {
+  const [allowRemote, setAllowRemote] = useState(false);
+  const remote = useMemo(() => hasRemoteContent(html), [html]);
+  return (
+    <>
+      {remote && !allowRemote && (
+        <p className="panel-note mail-remote">
+          Remote images are blocked.{" "}
+          <button type="button" className="btn btn-secondary btn-xs" onClick={() => setAllowRemote(true)}>
+            Load remote images
+          </button>
+        </p>
+      )}
+      <iframe
+        className="mail-frame"
+        title="Message"
+        sandbox={MAIL_FRAME_SANDBOX}
+        referrerPolicy="no-referrer"
+        srcDoc={mailFrameDoc(html, allowRemote)}
+      />
+    </>
+  );
 }
 
 function AccountDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {

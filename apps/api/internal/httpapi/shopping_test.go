@@ -84,6 +84,7 @@ func TestShopping(t *testing.T) {
 	}
 
 	// Ownership: a second user must not see the first user's list.
+	openRegistration(t, srv, session)
 	code, regBody := doJSONStatus(t, srv, http.MethodPost, "/api/auth/register",
 		`{"email":"other@cal.local","password":"test-pass-123"}`, "")
 	if code != http.StatusOK {

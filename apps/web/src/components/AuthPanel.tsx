@@ -162,6 +162,7 @@ export function AuthPanel() {
                 type="password"
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
                 minLength={8}
+                maxLength={mode === "login" ? undefined : 72}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -176,6 +177,7 @@ export function AuthPanel() {
                 type="password"
                 autoComplete="new-password"
                 minLength={8}
+                maxLength={72}
                 value={confirm}
                 onChange={(event) => setConfirm(event.target.value)}
                 required

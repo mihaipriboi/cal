@@ -1141,6 +1141,7 @@ export function SettingsPage() {
               className="input"
               type="password"
               placeholder="New password (8+ chars)"
+              maxLength={72}
               value={pwNext}
               onChange={(e) => setPwNext(e.target.value)}
             />
@@ -1182,7 +1183,8 @@ export function SettingsPage() {
             <h3>Users &amp; access</h3>
             <p className="panel-note">
               Instance administration. The first registered account is the administrator;
-              admins manage who can sign up and who keeps an account.
+              admins manage who can sign up and who keeps an account. Sign-ups are closed
+              by default once that first account exists; open them to invite someone.
             </p>
             {adminCfg && (
               <label className="switch-row" style={{ marginBottom: 12 }}>

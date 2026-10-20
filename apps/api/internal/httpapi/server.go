@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,6 +54,15 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 	}
 
 	router := gin.New()
+	// ClientIP() (rate limits) only honors X-Forwarded-For from listed
+	// proxies; unset trusts none, so the socket peer is the client.
+	proxies, err := trustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err == nil {
+		err = router.SetTrustedProxies(proxies)
+	}
+	if err != nil {
+		log.Fatalf("TRUSTED_PROXIES: %v", err)
+	}
 	router.Use(gin.Recovery())
 	router.Use(securityHeaders())
 	router.Use(cors.New(cors.Config{
@@ -255,7 +266,15 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 
 func (s *Server) register(c *gin.Context) {
 	var input authRequest
-	if !bind(c, &input) || !validAuth(input) {
+	if !bind(c, &input) {
+		c.String(http.StatusBadRequest, "invalid email or password")
+		return
+	}
+	if err := auth.ValidatePassword(input.Password); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if !validAuth(input) {
 		c.String(http.StatusBadRequest, "invalid email or password")
 		return
 	}
@@ -269,6 +288,10 @@ func (s *Server) register(c *gin.Context) {
 		return
 	}
 	user, err := s.store.CreateUser(c.Request.Context(), input.Email, hash)
+	if errors.Is(err, store.ErrRegistrationClosed) {
+		c.String(http.StatusForbidden, "registration is closed")
+		return
+	}
 	if err != nil {
 		c.String(http.StatusConflict, "account already exists")
 		return
@@ -900,8 +923,12 @@ func (s *Server) changePassword(c *gin.Context) {
 		Current  string `json:"current"`
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil || len(body.Password) < 8 || len(body.Password) > 128 {
-		c.String(http.StatusBadRequest, "password must be 8-128 characters")
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid request")
+		return
+	}
+	if err := auth.ValidatePassword(body.Password); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 	user, hash, err := s.store.UserByEmail(c.Request.Context(), currentUser(c).Email)
@@ -931,6 +958,25 @@ func securityHeaders() gin.HandlerFunc {
 		c.Header("Content-Security-Policy", "default-src 'self'")
 		c.Next()
 	}
+}
+
+// trustedProxies parses a comma-separated list of proxy IPs/CIDRs. Empty
+// input returns nil (trust no proxy).
+func trustedProxies(raw string) ([]string, error) {
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if net.ParseIP(p) == nil {
+			if _, _, err := net.ParseCIDR(p); err != nil {
+				return nil, fmt.Errorf("invalid IP or CIDR %q", p)
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func env(key, fallback string) string {

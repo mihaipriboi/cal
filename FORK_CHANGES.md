@@ -27,6 +27,10 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-008](#fc-008--compose-builds-the-image-locally) | deploy | `docker-compose.yml` always builds the app image from the checkout | no |
 | [FC-009](#fc-009--ci-manual-image-publishing-no-automatic-releases) | CI | Manual, pinned workflow publishes `ghcr.io/mihaipriboi/cal`; upstream release workflows are manual-only | no |
 | [FC-010](#fc-010--deploy-compose-for-the-published-image) | deploy | `deploy/compose.yml` runs the published image at a pinned tag | no |
+| [FC-011](#fc-011--uploads-served-by-sniffed-type-unsafe-types-download) | API | Uploaded files are served by sniffed type; anything that could run script downloads instead of rendering | yes |
+| [FC-012](#fc-012--cors-exact-origin-matching) | API | CORS matches origins by parsed host instead of string prefix | yes |
+| [FC-013](#fc-013--android-mail-requires-tls-and-checks-the-host) | Android | Native mail requires STARTTLS on plain ports and verifies the certificate hostname | yes |
+| [FC-014](#fc-014--optional-network-restriction-for-the-mail-api) | API | Optional `MAIL_ALLOWED_NETS` limits the Mail API to listed networks | yes |
 
 ## Details
 
@@ -142,3 +146,48 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** fork-only, additive.
 - **Upstreamable:** no.
 - **Tests:** checked on the deploy host with `docker compose config` and `up -d` (no Docker on the dev machine).
+
+### FC-011 — Uploads served by sniffed type; unsafe types download
+
+- **Why:** `/api/files/<name>` and shared file links were served with an extension-derived type and `Content-Disposition: inline` on the app's own origin. An uploaded HTML or SVG file could therefore run script with the user's session when opened.
+- **What changed:** `httpapi/files.go`, new `serveUpload` used by both `serveFile` and `serveSharedFile`.
+  - The type comes from the file's first 512 bytes (`http.DetectContentType`), not the name or the stored MIME.
+  - Images, audio/video, PDF and plain text are served inline. Anything else (HTML, SVG, XML, scripts, unknown) is `application/octet-stream` with `Content-Disposition: attachment`.
+  - Non-PDF responses carry `Content-Security-Policy: sandbox; default-src 'none'; …`. PDFs skip `sandbox` because browsers won't run their PDF viewer in a sandboxed document.
+  - The filename in the header has quotes, backslashes and CR/LF stripped.
+- **Compatibility:** opening an uploaded HTML/SVG file now downloads it instead of rendering it. Image previews and PDFs behave as before.
+- **Upstreamable:** yes.
+- **Tests:** `files_serve_test.go` covers HTML, SVG, HTML bytes with a `.png` name, PNG, text and PDF, plus header sanitising.
+
+### FC-012 — CORS exact origin matching
+
+- **Why:** the CORS check accepted any origin *starting with* `http://localhost`, `http://127.0.0.1` and so on, so `http://localhost.example.com` passed. It also accepted any `capacitor://` or `ionic://` host.
+- **What changed:** `httpapi/server.go`, new `allowedOrigin`.
+  - `WEB_ORIGIN` must match exactly.
+  - Otherwise the origin is parsed. `capacitor://localhost` and `ionic://localhost` are allowed, and so are `http(s)` origins whose hostname is exactly `localhost`, `127.0.0.1` or `::1` (any port).
+  - Origins with userinfo, a path, a query or a fragment are rejected.
+- **Compatibility:** no change for the web app, the Capacitor apps or local dev servers.
+- **Upstreamable:** yes.
+- **Tests:** `TestAllowedOrigin` (table of allowed and rejected origins).
+
+### FC-013 — Android mail requires TLS and checks the host
+
+- **Why:** the native mail client (JavaMail 1.6) enabled STARTTLS but didn't require it, so a network attacker could strip the upgrade and see credentials in cleartext. JavaMail 1.6 also doesn't verify that the server certificate matches the hostname unless told to.
+- **What changed:** `MailUtil.tlsProps`, used for both IMAP and SMTP in `CalMailPlugin`.
+  - Plain ports set `starttls.enable` and `starttls.required`.
+  - `ssl.checkserveridentity=true` unless the account's existing "insecure" flag is set. That flag keeps its previous meaning: trust-all plus no hostname check, for self-signed servers.
+- **Compatibility:** servers that don't offer STARTTLS on a plain port now fail to connect instead of falling back to cleartext.
+- **Upstreamable:** yes.
+- **Tests:** `MailUtilTest` (three `tlsProps` cases).
+
+### FC-014 — Optional network restriction for the Mail API
+
+- **Why:** the Mail module holds IMAP/SMTP credentials that can read, delete and send mail. Some deployments want it usable only from the local network or a VPN, even when the rest of Cal is reachable from the internet.
+- **What changed:**
+  - New env `MAIL_ALLOWED_NETS`: comma-separated IPs/CIDRs, parsed at startup, where invalid values stop the server.
+  - When set, every `/api/mail/*` route returns 403 ("Mail is only available from your local network or VPN") unless `ClientIP()` is inside one of the networks. `ClientIP()` is the same value rate limiting uses, so it honors `TRUSTED_PROXIES`.
+  - Unset means no restriction (previous behavior).
+  - Added to `deploy/compose.yml`, `deploy/.env.example` and the README config table.
+- **Compatibility:** opt-in, so there's no change unless the variable is set. The native Android mail client talks to the mail server directly and isn't affected.
+- **Upstreamable:** yes.
+- **Tests:** `TestRequireClientNet` covers LAN direct, VPN via the proxy, internet via the proxy, a spoofed left-most `X-Forwarded-For`, an untrusted peer, IPv6, and the unset case.

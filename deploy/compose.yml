@@ -19,6 +19,7 @@ services:
       SESSION_SECURE: "true"
       WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN, e.g. https://cal.example.com}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      MAIL_ALLOWED_NETS: ${MAIL_ALLOWED_NETS:-}
       TZ: ${TZ:-UTC}
     ports:
       - "${PORT:-8080}:8080"

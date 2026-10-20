@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNull;
 import org.junit.Test;
 
 import java.util.Date;
+import java.util.Properties;
 
 public class MailUtilTest {
 
@@ -38,5 +39,32 @@ public class MailUtilTest {
     public void iso_utcRfc3339() {
         assertEquals("2026-09-12T08:30:00Z", MailUtil.iso(new Date(1789201800000L)));
         assertEquals("", MailUtil.iso(null));
+    }
+
+    @Test
+    public void tlsProps_plainPortRequiresStarttlsAndHostCheck() {
+        Properties p = new Properties();
+        MailUtil.tlsProps(p, "imap", false, false);
+        assertEquals("true", p.getProperty("mail.imap.starttls.enable"));
+        assertEquals("true", p.getProperty("mail.imap.starttls.required"));
+        assertEquals("true", p.getProperty("mail.imap.ssl.checkserveridentity"));
+        assertNull(p.getProperty("mail.imap.ssl.trust"));
+    }
+
+    @Test
+    public void tlsProps_implicitTlsChecksHost() {
+        Properties p = new Properties();
+        MailUtil.tlsProps(p, "smtps", true, false);
+        assertNull(p.getProperty("mail.smtps.starttls.enable"));
+        assertEquals("true", p.getProperty("mail.smtps.ssl.checkserveridentity"));
+    }
+
+    @Test
+    public void tlsProps_insecureOptOutKeepsStarttlsRequired() {
+        Properties p = new Properties();
+        MailUtil.tlsProps(p, "smtp", false, true);
+        assertEquals("true", p.getProperty("mail.smtp.starttls.required"));
+        assertEquals("*", p.getProperty("mail.smtp.ssl.trust"));
+        assertEquals("false", p.getProperty("mail.smtp.ssl.checkserveridentity"));
     }
 }

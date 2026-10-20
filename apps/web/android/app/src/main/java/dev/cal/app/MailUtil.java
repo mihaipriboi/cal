@@ -3,6 +3,7 @@ package dev.cal.app;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.TimeZone;
 
 /** Pure helpers for CalMailPlugin — kept class-free so JVM tests need no Android. */
@@ -31,5 +32,23 @@ final class MailUtil {
     /** Strip CR/LF so a header value can't inject extra headers. */
     static String cleanHeader(String s) {
         return s == null ? "" : s.replace("\r", "").replace("\n", "");
+    }
+
+    /** TLS settings shared by IMAP and SMTP. Plain ports must upgrade with
+     *  STARTTLS (no silent cleartext fallback), and the certificate must match
+     *  the host: JavaMail 1.6 skips that check unless asked. The per-account
+     *  "insecure" flag (self-hosted mail, self-signed cert) opts that account
+     *  into trust-all + no hostname check, as before. */
+    static void tlsProps(Properties props, String proto, boolean implicitTls, boolean insecure) {
+        if (!implicitTls) {
+            props.put("mail." + proto + ".starttls.enable", "true");
+            props.put("mail." + proto + ".starttls.required", "true");
+        }
+        if (insecure) {
+            props.put("mail." + proto + ".ssl.trust", "*");
+            props.put("mail." + proto + ".ssl.checkserveridentity", "false");
+        } else {
+            props.put("mail." + proto + ".ssl.checkserveridentity", "true");
+        }
     }
 }

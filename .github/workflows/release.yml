@@ -1,8 +1,8 @@
 name: Release
 
+# Fork: manual only. This fork publishes its container image with
+# fork-image.yml and doesn't cut upstream-style releases automatically.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:

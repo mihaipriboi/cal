@@ -26,6 +26,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-007](#fc-007--android-no-backups-https-only-no-default-keystore-password) | Android | App data excluded from backups; HTTPS only; no built-in keystore password | partly |
 | [FC-008](#fc-008--compose-builds-the-image-locally) | deploy | `docker-compose.yml` always builds the app image from the checkout | no |
 | [FC-009](#fc-009--ci-manual-image-publishing-no-automatic-releases) | CI | Manual, pinned workflow publishes `ghcr.io/mihaipriboi/cal`; upstream release workflows are manual-only | no |
+| [FC-010](#fc-010--deploy-compose-for-the-published-image) | deploy | `deploy/compose.yml` runs the published image at a pinned tag | no |
 
 ## Details
 
@@ -129,3 +130,15 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** fork-only.
 - **Upstreamable:** no.
 - **Tests:** `actionlint` v1.7.7 passes on all changed workflows.
+
+### FC-010 — Deploy compose for the published image
+
+- **Why:** a host should be able to run the fork from its published image without a source checkout or a local build, and never pick up a new version implicitly.
+- **What changed:** new `deploy/compose.yml` and `deploy/.env.example`.
+  - The `cal` image is `ghcr.io/mihaipriboi/cal:${CAL_TAG}`, and `CAL_TAG` is required, so there's no floating `latest`.
+  - It uses the external Postgres service.
+  - `SESSION_SECURE=true`, and `WEB_ORIGIN`, `TRUSTED_PROXIES` and `TZ` come from `.env`.
+  - The root `docker-compose.yml` (build from source) is unchanged.
+- **Compatibility:** fork-only, additive.
+- **Upstreamable:** no.
+- **Tests:** checked on the deploy host with `docker compose config` and `up -d` (no Docker on the dev machine).

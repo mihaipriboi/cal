@@ -1,0 +1,49 @@
+# Cal from the published image: ghcr.io/mihaipriboi/cal (built by the
+# "Fork image" workflow). Copy this file and .env.example to the host:
+#
+#   cp .env.example .env && chmod 600 .env   # then fill it in
+#   docker compose up -d
+#
+# Updating: run the workflow, set CAL_TAG to the new sha-<commit> tag, then
+# `docker compose up -d`. Nothing updates unless CAL_TAG changes.
+# Volumes: cal-pg = database, cal-data = uploads and app backups. Back up both.
+
+services:
+  cal:
+    image: ghcr.io/mihaipriboi/cal:${CAL_TAG:?set CAL_TAG to a published tag, e.g. sha-abc1234}
+    pull_policy: missing
+    environment:
+      DATABASE_URL: postgres://cal:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/cal?sslmode=disable
+      PORT: "8080"
+      GIN_MODE: release
+      SESSION_SECURE: "true"
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN, e.g. https://cal.example.com}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      TZ: ${TZ:-UTC}
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - cal-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cal
+      POSTGRES_USER: cal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - cal-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cal -d cal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  cal-data:
+  cal-pg:

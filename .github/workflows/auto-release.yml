@@ -9,9 +9,10 @@ name: Auto release
 #   - "[no-release]" anywhere in the merge/commit message skips the run.
 #   - HEAD already carrying a v* tag skips the run (manual tag flow).
 
+# Fork: manual only. This fork publishes its container image with
+# fork-image.yml and doesn't cut upstream-style releases automatically.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write # bump commit + tag

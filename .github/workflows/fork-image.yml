@@ -1,0 +1,89 @@
+name: Fork image
+
+# Builds the all-in-one image from main and pushes it to
+# ghcr.io/<owner>/cal. Manual on purpose: run it after reviewing what landed
+# on main, then deploy by pinning the printed sha-<commit> tag.
+#
+# Third-party actions are pinned to commit SHAs (version in the comment).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Extra tag, e.g. 0.1.10-fork.1 (optional)"
+        required: false
+        default: ""
+      latest:
+        description: "Also move the 'latest' tag"
+        type: boolean
+        default: true
+      platforms:
+        description: "Target platforms"
+        type: choice
+        default: linux/amd64
+        options:
+          - linux/amd64
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fork-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable=${{ inputs.latest }}
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=fork-image
+          cache-to: type=gha,mode=max,scope=fork-image
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Image pushed"
+            echo
+            echo "Digest: \`$DIGEST\`"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+            echo
+            echo "Pin \`CAL_TAG=sha-${GITHUB_SHA::7}\` in the deploy .env."
+          } >> "$GITHUB_STEP_SUMMARY"

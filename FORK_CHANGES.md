@@ -25,6 +25,8 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-006](#fc-006--html-mail-in-a-sandboxed-frame-csp-for-the-app-shell) | web, Android | HTML mail in a sandboxed iframe; CSP meta for the app shell; mail-password export needs a native confirmation | yes |
 | [FC-007](#fc-007--android-no-backups-https-only-no-default-keystore-password) | Android | App data excluded from backups; HTTPS only; no built-in keystore password | partly |
 | [FC-008](#fc-008--compose-builds-the-image-locally) | deploy | `docker-compose.yml` always builds the app image from the checkout | no |
+| [FC-009](#fc-009--ci-manual-image-publishing-no-automatic-releases) | CI | Manual, pinned workflow publishes `ghcr.io/mihaipriboi/cal`; upstream release workflows are manual-only | no |
+| [FC-010](#fc-010--deploy-compose-for-the-published-image) | deploy | `deploy/compose.yml` runs the published image at a pinned tag | no |
 
 ## Details
 
@@ -114,3 +116,29 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** fork-only. `install.sh` is unchanged and still targets upstream (it downloads upstream's compose file and pulls its image). For the fork, use `docker compose up -d --build` from a checkout instead.
 - **Upstreamable:** no.
 - **Tests:** none possible without Docker on the dev machine; verify with `docker compose config` and `docker compose up -d --build` on the deploy host.
+
+### FC-009 — CI: manual image publishing, no automatic releases
+
+- **Why:** the fork publishes its own container image and releases nothing automatically. Upstream's `auto-release.yml` bumps the version, commits, tags and dispatches the release pipelines on every push to `main`, and `release.yml`/`android.yml` publish on any `v*` tag. Enabling Actions on the fork would publish releases under the fork on the next push, including tags fetched from upstream.
+- **What changed:**
+  - `auto-release.yml`, `release.yml` and `android.yml` are triggered only by `workflow_dispatch` (a comment says why).
+  - New `fork-image.yml` (manual, `main` only) builds the Dockerfile and pushes `ghcr.io/<owner>/cal` tagged `sha-<commit>`, plus optionally `latest` and a custom tag.
+    - It runs with `contents: read` and `packages: write` permissions, and the checkout keeps no persisted credentials.
+    - Every third-party action is pinned to a commit SHA.
+    - It records max-mode provenance and an SBOM, and prints the tag and digest in the job summary.
+  - `ci.yml` (tests and the image smoke build) is unchanged.
+- **Compatibility:** fork-only.
+- **Upstreamable:** no.
+- **Tests:** `actionlint` v1.7.7 passes on all changed workflows.
+
+### FC-010 — Deploy compose for the published image
+
+- **Why:** a host should be able to run the fork from its published image without a source checkout or a local build, and never pick up a new version implicitly.
+- **What changed:** new `deploy/compose.yml` and `deploy/.env.example`.
+  - The `cal` image is `ghcr.io/mihaipriboi/cal:${CAL_TAG}`, and `CAL_TAG` is required, so there's no floating `latest`.
+  - It uses the external Postgres service.
+  - `SESSION_SECURE=true`, and `WEB_ORIGIN`, `TRUSTED_PROXIES` and `TZ` come from `.env`.
+  - The root `docker-compose.yml` (build from source) is unchanged.
+- **Compatibility:** fork-only, additive.
+- **Upstreamable:** no.
+- **Tests:** checked on the deploy host with `docker compose config` and `up -d` (no Docker on the dev machine).

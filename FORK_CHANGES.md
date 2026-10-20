@@ -18,6 +18,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | ID | Area | Summary | Upstreamable |
 | --- | --- | --- | --- |
 | [FC-001](#fc-001--trust-only-configured-reverse-proxies) | API | Client IP honors `X-Forwarded-For` only from `TRUSTED_PROXIES` | yes |
+| [FC-002](#fc-002--sign-ups-closed-by-default-after-the-first-account) | API, web | Sign-ups closed by default once an account exists; first sign-up race-free | yes |
 
 ## Details
 
@@ -28,3 +29,15 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** deployments behind a reverse proxy should set `TRUSTED_PROXIES` to the proxy's address. Otherwise all clients share the proxy's rate-limit bucket. That's safe, just coarser.
 - **Upstreamable:** yes.
 - **Tests:** `ratelimit_test.go`: rotating `X-Forwarded-For` doesn't bypass the limiter; a trusted proxy gives per-client buckets and ignores prepended fake hops; env parsing.
+
+### FC-002 — Sign-ups closed by default after the first account
+
+- **Why:** registration stayed open after the first (admin) account unless an admin closed it, and a failed user count or config read let sign-ups through. An instance exposed to the internet would accept strangers until someone noticed the toggle. Two simultaneous first sign-ups could also both become admin.
+- **What changed:**
+  - `AllowRegistration` is true only when an admin has explicitly set it. A missing key or a DB error reads as closed.
+  - `registrationClosed` fails closed on errors.
+  - `CreateUser` runs in a transaction under a Postgres advisory lock. It re-checks the policy there (the first account is always admitted and becomes admin) and returns `ErrRegistrationClosed`, which the handler maps to 403.
+  - The Settings → Users & access note explains the default.
+- **Compatibility:** behavior change for existing instances whose admin never touched the toggle: sign-ups are now closed until the toggle is turned on. Fresh instances still accept their first account.
+- **Upstreamable:** yes.
+- **Tests:** the admin test checks default-closed (403), then opening; new `TestConcurrentFirstRegistration` (6 parallel first sign-ups → exactly one admin, the rest 403). The test helper gained `newEmptyTestServer` and `openRegistration`; the shopping test opens registration before adding its second user.

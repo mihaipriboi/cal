@@ -72,8 +72,8 @@ accounts on someone else's server — one container and it's yours.
   quantities, a "can't find it" flag, bulk check-off, clear-purchased, and
   autocomplete from your own item history
 - **Admin & multi-user** — the first registered account administers the
-  instance: open/close sign-ups, promote admins, remove accounts, all from
-  Settings → Users & access
+  instance: open/close sign-ups (closed by default once it exists), promote
+  admins, remove accounts, all from Settings → Users & access
 - **Portable** — full JSON export one click away, or a zip that packs every
   upload binary too; restores merge additively, and the server writes
   nightly snapshots for 14 days

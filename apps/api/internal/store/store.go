@@ -16,6 +16,7 @@ import (
 
 var ErrNotFound = errors.New("not found")
 var ErrInvalid = errors.New("invalid entry")
+var ErrRegistrationClosed = errors.New("registration is closed")
 
 type Store struct {
 	db *pgxpool.Pool
@@ -182,18 +183,46 @@ func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
+// registrationLock serializes sign-ups so two concurrent first registrations
+// can't both become admin or slip past a just-closed policy.
+const registrationLock = 7166001
+
+// CreateUser registers an account. The first account is admin and always
+// allowed; later ones need allow_registration = "true", re-checked under the
+// lock so the policy can't race with a concurrent sign-up.
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (User, error) {
-	var u User
-	err := s.db.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash, is_admin)
-		VALUES ($1, $2, NOT EXISTS (SELECT 1 FROM users))
-		RETURNING id::text, email, is_admin, created_at
-	`, NormalizeEmail(email), passwordHash).Scan(&u.ID, &u.Email, &u.IsAdmin, &u.CreatedAt)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return User{}, err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO settings (user_id) VALUES ($1)`, u.ID)
-	return u, err
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, registrationLock); err != nil {
+		return User{}, err
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&count); err != nil {
+		return User{}, err
+	}
+	if count > 0 {
+		var allow string
+		err := tx.QueryRow(ctx, `SELECT value FROM server_config WHERE key = $1`, cfgAllowRegistration).Scan(&allow)
+		if err != nil || allow != "true" {
+			return User{}, ErrRegistrationClosed
+		}
+	}
+	var u User
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash, is_admin)
+		VALUES ($1, $2, $3)
+		RETURNING id::text, email, is_admin, created_at
+	`, NormalizeEmail(email), passwordHash, count == 0).Scan(&u.ID, &u.Email, &u.IsAdmin, &u.CreatedAt)
+	if err != nil {
+		return User{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO settings (user_id) VALUES ($1)`, u.ID); err != nil {
+		return User{}, err
+	}
+	return u, tx.Commit(ctx)
 }
 
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, string, error) {

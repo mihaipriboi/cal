@@ -54,11 +54,12 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	return err
 }
 
-// AllowRegistration defaults to open — a fresh instance must accept its
-// first account, and self-hosted single-user installs want invites by link.
+// AllowRegistration is closed unless an admin explicitly opened it; a missing
+// key or a DB error reads as closed. The first account is admitted separately
+// (CreateUser), so a fresh instance still bootstraps.
 func (s *Store) AllowRegistration(ctx context.Context) bool {
 	v, err := s.ServerConfig(ctx, cfgAllowRegistration)
-	return err != nil || v != "false"
+	return err == nil && v == "true"
 }
 
 func (s *Store) SetAllowRegistration(ctx context.Context, allow bool) error {

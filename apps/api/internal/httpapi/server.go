@@ -280,6 +280,10 @@ func (s *Server) register(c *gin.Context) {
 		return
 	}
 	user, err := s.store.CreateUser(c.Request.Context(), input.Email, hash)
+	if errors.Is(err, store.ErrRegistrationClosed) {
+		c.String(http.StatusForbidden, "registration is closed")
+		return
+	}
 	if err != nil {
 		c.String(http.StatusConflict, "account already exists")
 		return

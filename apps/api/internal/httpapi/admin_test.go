@@ -3,9 +3,11 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -45,7 +47,18 @@ func TestAdminBootstrapAndPolicy(t *testing.T) {
 		t.Fatalf("first user must be admin: %s", me)
 	}
 
-	// Second user is not.
+	// Once a user exists, registration is closed until an admin opens it.
+	closedCfg := doJSON(t, srv, http.MethodGet, "/api/auth/config", "", "")
+	if !strings.Contains(closedCfg, `"registrationOpen":false`) {
+		t.Fatalf("registration must default to closed: %s", closedCfg)
+	}
+	if code, body := doJSONStatus(t, srv, http.MethodPost, "/api/auth/register",
+		`{"email":"early@cal.local","password":"test-pass-123"}`, ""); code != http.StatusForbidden {
+		t.Fatalf("default-closed register must 403, got %d %s", code, body)
+	}
+	openRegistration(t, srv, adminSession)
+
+	// Second user is not admin.
 	code, body := doJSONStatus(t, srv, http.MethodPost, "/api/auth/register",
 		`{"email":"two@cal.local","password":"test-pass-123"}`, "")
 	if code != http.StatusOK {
@@ -110,5 +123,39 @@ func TestAdminBootstrapAndPolicy(t *testing.T) {
 	}
 	if code, _ := doJSONStatus(t, srv, http.MethodDelete, "/api/admin/users/"+reg2.User.ID, "", adminSession); code != http.StatusNoContent {
 		t.Fatalf("delete second admin (one remains) must 204, got %d", code)
+	}
+}
+
+// Concurrent first sign-ups: exactly one wins (and is admin); the rest see a
+// closed instance rather than racing past the bootstrap check.
+func TestConcurrentFirstRegistration(t *testing.T) {
+	srv := newEmptyTestServer(t)
+	const n = 6 // under the 8/min auth rate limit
+	codes := make(chan int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			code, _ := doJSONStatus(t, srv, http.MethodPost, "/api/auth/register",
+				fmt.Sprintf(`{"email":"u%d@cal.local","password":"test-pass-123"}`, i), "")
+			codes <- code
+		}(i)
+	}
+	wg.Wait()
+	close(codes)
+	ok, forbidden := 0, 0
+	for c := range codes {
+		switch c {
+		case http.StatusOK:
+			ok++
+		case http.StatusForbidden:
+			forbidden++
+		default:
+			t.Fatalf("unexpected status %d", c)
+		}
+	}
+	if ok != 1 || forbidden != n-1 {
+		t.Fatalf("want 1 success and %d refusals, got %d / %d", n-1, ok, forbidden)
 	}
 }

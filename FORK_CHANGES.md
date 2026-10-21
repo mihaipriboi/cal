@@ -33,6 +33,20 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-014](#fc-014--optional-network-restriction-for-the-mail-api) | API | Optional `MAIL_ALLOWED_NETS` limits the Mail API to listed networks | yes |
 | [FC-015](#fc-015--address-check-at-connect-time-for-user-supplied-urls) | API | Link previews, feeds and webhooks check the address actually dialed, on every redirect | yes |
 | [FC-016](#fc-016--deploy-compose-follows-latest) | deploy | `deploy/compose.yml` follows `latest`; updating is `docker compose pull && docker compose up -d` | no |
+| [FC-017](#fc-017--image-build-fetches-and-runs-less) | build | No embedded-Postgres download and no npm install scripts during the image build | yes |
+| [FC-018](#fc-018--mcp-card-tools-check-the-columns-board) | API | MCP `create_card`/`move_card` only accept a column of the card's board | yes |
+| [FC-019](#fc-019--github-sync-loop-reuses-one-ticker) | API | GitHub sync uses one ticker instead of one per iteration | yes |
+| [FC-020](#fc-020--push-subscriptions-scoped-to-their-owner) | API | Push subscribe/unsubscribe can't take over or delete another user's endpoint | yes |
+| [FC-021](#fc-021--no-property-injection-through-icalendar-urlimage) | ICS | CR/LF can't inject properties into `feed.ics` or CalDAV pushes | yes |
+| [FC-022](#fc-022--note-links-and-images-limited-to-safe-urls) | web | Markdown links only for http(s)/mailto/same-origin; no protocol-relative images | yes |
+| [FC-023](#fc-023--web-session-stays-in-the-httponly-cookie) | auth | Web client keeps no session token; `?session=` only authorizes GET/HEAD | yes |
+| [FC-024](#fc-024--logout-clears-cached-personal-data) | web | Logout drops the entries snapshot and API cache; tokens never cached in localStorage | yes |
+| [FC-025](#fc-025--all-workflow-actions-pinned-by-commit) | CI | Every GitHub Action is pinned to a commit SHA | yes |
+| [FC-026](#fc-026--credential-key-outside-the-database-github-token-encrypted-and-write-only) | security | Encryption key moves to `DATA_DIR/secret.key`; GitHub token encrypted, write-only; tokens left out of exports/backups | yes |
+| [FC-027](#fc-027--closing-linked-github-issues-is-opt-in) | API | Completing a card closes its GitHub issue only if `githubCloseIssues` is on | yes |
+| [FC-028](#fc-028--one-token-per-capability) | auth | Separate tokens for MCP, email intake, ICS feed and widget | yes |
+| [FC-029](#fc-029--sessions-stored-as-hashes) | auth | Session tokens stored as SHA-256; session list shows hashes, not tokens | yes |
+| [FC-030](#fc-030--logout-ends-bearer-sessions-too) | auth | Native (Bearer) logout now invalidates the session server-side | yes |
 
 ## Details
 
@@ -232,3 +246,192 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - `docker compose config` resolves the image to `:latest` with `CAL_TAG` unset or empty, and to the pinned tag when set.
   - Docker Compose 5.6.0 confirms `pull` re-pulls a present tag without `pull_policy`, and skips it with `pull_policy: missing`.
   - `actionlint` v1.7.7 passes on `fork-image.yml`.
+
+### FC-017 — Image build fetches and runs less
+
+- **Why:**
+  - The Dockerfile booted the server once during the build to "pre-warm" the embedded Postgres. That downloads about 80 MB of executables from Maven Central, whose checksum check is skipped if the checksum can't be fetched, and bakes an initialised cluster into a layer. Deployments with an external database (`DATABASE_URL`, as in both compose files) never use it.
+  - `npm ci` also ran package install scripts, which no dependency needs on Linux. The only one is `fsevents`, which is macOS-only and not installed.
+- **What changed:** `Dockerfile`.
+  - The pre-warm runs only with `--build-arg PREWARM_EMBEDDED_PG=true`. The default is `false`.
+  - The web stage uses `npm ci --ignore-scripts`.
+  - The root `docker-compose.yml` comment notes that a single-container setup downloads the binaries on first start unless the image was pre-warmed.
+- **Compatibility:**
+  - Images with an external database behave the same and are smaller.
+  - A container started *without* `DATABASE_URL` now downloads the embedded Postgres on first boot (needs network), unless built with the argument.
+- **Upstreamable:** yes.
+- **Tests:** `docker build` of the image, with the build log checked for no Maven traffic, and a smoke run against an external Postgres.
+
+### FC-018 — MCP card tools check the column's board
+
+- **Why:** the MCP `create_card` and `move_card` tools accepted any `columnId`, unlike the REST handlers (`createEntry`, `moveCard`) and the shared-board move. An agent could place a card on one board in a column of another.
+- **What changed:** `httpapi/mcp.go`. Both tools call `ColumnInBoard` and return a tool error ("column not on this board") otherwise. `create_card` checks only when a column is given.
+- **Compatibility:** no change for valid calls.
+- **Upstreamable:** yes.
+- **Tests:** `TestMCPCardColumnMustBelongToBoard` (`mcp_cards_test.go`): cross-board create and move are refused, same-board ones work.
+
+### FC-019 — GitHub sync loop reuses one ticker
+
+- **Why:** `GitHubSyncLoop` created a new `time.Ticker` on every loop iteration. With Go 1.23+ (this module targets 1.26), unreferenced tickers are garbage-collected, so the practical cost was an allocation per wait. Under older toolchains, each one leaked.
+- **What changed:** `httpapi/github.go` creates one ticker before the loop and stops it on exit.
+- **Compatibility:** none.
+- **Upstreamable:** yes.
+- **Tests:** none specific. `go vet` and the existing suite pass.
+
+### FC-020 — Push subscriptions scoped to their owner
+
+- **Why:** subscribing reassigned an existing push endpoint to whoever posted it (`ON CONFLICT (endpoint) DO UPDATE SET user_id = …`), and `POST /api/push/unsubscribe` deleted an endpoint regardless of owner. With several accounts, a user who learned another's endpoint could silence that device or delete its subscription.
+- **What changed:**
+  - `store.UpsertPushSub` updates an existing endpoint only if it belongs to the same user, **or** the posted `p256dh`/`auth` keys equal the stored ones. That is the same browser subscription switching accounts, which keeps working as before.
+  - Unsubscribe uses the new `DeleteUserPushSub(user, endpoint)`.
+  - `DeletePushSub(endpoint)` stays for the reminder loop, which prunes endpoints the push service reports gone.
+- **Compatibility:** unchanged for single-user setups and for account switching in one browser. A foreign subscribe or unsubscribe of someone else's endpoint is now a silent no-op (still 204).
+- **Upstreamable:** yes.
+- **Tests:** `TestPushSubscriptionOwnership`: a foreign subscribe with different keys and a foreign unsubscribe leave the owner's row alone, the same keys move it, and the owner can unsubscribe.
+
+### FC-021 — No property injection through iCalendar URL/IMAGE
+
+- **Why:** the iCalendar encoder (used by `/api/feed.ics`, the shared people calendar and CalDAV push) wrote `URL:` and `IMAGE:` values verbatim. A CR/LF in an entry's link URL therefore started a new property line, so arbitrary properties could be injected into the feed or the pushed object. TEXT values escaped `\n` but passed a bare `\r` through.
+- **What changed:** `internal/ical/ical.go`.
+  - New `uriValue` drops ASCII control characters from URI values. `URL` and `IMAGE` use it, are folded like other long lines, and are omitted when empty.
+  - `escapeText` also turns `\r\n` and a bare `\r` into the escaped newline.
+- **Compatibility:** normal URLs are unchanged. Long URLs are now folded per RFC 5545; parsers unfold them.
+- **Upstreamable:** yes.
+- **Tests:** `TestEncodeNoPropertyInjection`: CR, LF and CRLF in summary, description, URL and a long image URL produce no extra property lines and round-trip through `Parse`.
+
+### FC-022 — Note links and images limited to safe URLs
+
+- **Why:** the note renderer (`lib/markdown.tsx`) put any Markdown link target into `href`. `javascript:` is blocked by React 19 and the web CSP, but other schemes (`data:`, `intent:`, `vbscript:`) weren't filtered, and the Capacitor shell has no CSP. Images allowed any `src` starting with `/`, which includes protocol-relative `//host/…` and `/\host/…`, so they loaded from other hosts.
+- **What changed:** `lib/markdown.tsx`.
+  - New exported `safeHref`: only `http(s)://`, `mailto:` and same-origin paths become links. Anything else renders as plain text.
+  - "Same-origin" means a single leading `/`, not `//` or `/\`. Image sources use the same rule.
+- **Compatibility:** links with other schemes in notes now show as text.
+- **Upstreamable:** yes.
+- **Tests:** `lib/markdown.test.tsx` covers the allowed and rejected hrefs (including mixed case, leading space, `//` and `/\`), unsafe links rendered as text, and protocol-relative images not rendered.
+
+### FC-023 — Web session stays in the HttpOnly cookie
+
+- **Why:**
+  - The web app is authenticated by the `cal_session` HttpOnly cookie, but the API client also stored the session token from the login response in `localStorage` and appended it as `?session=` to file and image URLs. Script running in the page could read the token, and it reached access logs and browser history through those URLs.
+  - On the server, `?session=` authorized any request method, although it only exists for `<img src>` and file links in the native apps, which can't send headers.
+- **What changed:**
+  - `packages/api-client`: on a page served by the Cal server (not an app shell), the client keeps no token. `setSession` doesn't store it, a stale `cal:session` is removed on start, and `assetUrl` returns plain paths. App shells (Capacitor, Wails) keep the Bearer token and signed asset URLs as before.
+  - `lib/markdown.tsx`: `/api/…` image paths get the server and session only when a native server URL is set.
+  - `httpapi/server.go` `bearerOrQuery`: `?session=` is honoured only on GET/HEAD.
+- **Compatibility:** web sessions continue through the cookie, so there's no re-login. Native apps are unchanged: they use Bearer headers for API calls and `?session=` only for GETs.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `lib/remote.test.ts`: on a plain web page no token is stored and asset URLs are unsigned; in the Capacitor shell the token is stored and URLs are signed.
+  - `TestQuerySessionOnlyForReads`: GET with `?session=` → 200, PUT/POST with it → 401, Bearer POST works.
+
+### FC-024 — Logout clears cached personal data
+
+- **Why:** logging out removed only the cached user. Three things stayed in the browser:
+  - the offline entries snapshot (`cal:entries`, all entries);
+  - the service worker's `cal-api` cache of `/api/entries` and `/api/holidays` responses;
+  - `cal:settings`, which also held the API, widget and people-share tokens.
+- **What changed:** `lib/offline.ts`, `stores/planner.ts`.
+  - Logout calls `clearCachedData()`, which removes the cached user and the entries snapshot and deletes the `cal-api` Cache Storage bucket.
+  - `cacheSettings` blanks `widgetToken`, `apiToken` and `peopleShareToken` before writing. The server returns them with the settings on every load. The rest of the settings cache, such as the theme for the login screen, is kept.
+- **Compatibility:** after logout, an offline reload no longer shows the previous user's entries. The pending offline write queue (`cal:opq`) is left as is, so unsynced edits aren't discarded.
+- **Upstreamable:** yes.
+- **Tests:** `lib/offline.test.ts`: tokens never reach `cal:settings`; logout clears the user and entries, keeps the theme, and deletes the `cal-api` cache.
+
+### FC-025 — All workflow actions pinned by commit
+
+- **Why:** `ci.yml`, which runs on every push to `main` and on pull requests, and the manual release workflows referenced third-party actions by movable major tags (`@v7`). Whoever controls an action's repository can repoint such a tag. `fork-image.yml` was already pinned (FC-009).
+- **What changed:** every `uses:` in `ci.yml`, `android.yml`, `release.yml` and `auto-release.yml` is pinned to the commit its major tag pointed at on 2026-10-21, with the exact version in a comment. The commits match those already in `fork-image.yml` where the actions overlap.
+- **Compatibility:** none. Updating an action now means changing the SHA deliberately.
+- **Upstreamable:** yes.
+- **Tests:** `actionlint` v1.7.7 passes on all workflows. Each SHA was resolved with the GitHub API (`commits/<tag>`) and matched to its `vX.Y.Z` tag.
+- **Not changed:** `release.yml` still fetches AppImage tooling from moving `continuous` builds. That workflow is manual-only in the fork (FC-009) and isn't used to publish anything.
+
+### FC-026 — Credential key outside the database; GitHub token encrypted and write-only
+
+- **Why:**
+  - The AES-256-GCM key for stored credentials (CalDAV, CardDAV and mail passwords, Google tokens) was kept in `server_config`, in the same database as the ciphertexts, so any database dump or backup decrypted them. It was also generated lazily, so two concurrent first uses could each create a key.
+  - The GitHub token was stored in plaintext, returned to the browser in every settings response, and included in `/api/export` and the nightly `DATA_DIR/backups/*.json`. Those also contained the API, widget and people-share tokens.
+- **What changed:**
+  - **Key file** (`store/crypto.go`, `app/app.go`). The key lives in `CAL_SECRET_KEY_FILE`, default `<DATA_DIR>/secret.key` (mode 0600, base64). `store.InitSecrets` runs once at startup, under an advisory lock:
+    - A missing file is created. If the database still has the legacy `crypto_key`, that key is adopted as is, with no re-encryption. Otherwise a new random key is generated.
+    - A provided key file that differs from the legacy key gets every encrypted column re-encrypted to it, in one transaction.
+    - The legacy key is then deleted from the database, and a key fingerprint (`secret_key_fingerprint`, a truncated SHA-256) is stored.
+    - With a missing or different key file once credentials exist, startup fails with a clear error instead of generating a key that can't decrypt them.
+    - `Encrypt`/`Decrypt` fail with `ErrNoSecretKey` until `InitSecrets` has run.
+  - **GitHub token.**
+    - Migration `10002` adds `settings.github_token_enc`. `InitSecrets` encrypts existing plaintext tokens into it and clears `github_token`.
+    - The token is write-only: `PUT /api/settings/github-token {token}` and `DELETE /api/settings/github-token`. Settings responses carry `githubConnected` instead of the token.
+    - `PUT /api/settings` no longer writes it, and accepts and ignores a `githubToken` field from older clients.
+    - Server-side readers use `store.GitHubToken`: GitHub inbox, MCP `github_inbox`, the sync loop and card auto-close.
+  - **Exports and backups.** `/api/export` and the nightly backup files blank the API, widget and people-share tokens (`exportSettings`). Restore never read settings back, so nothing is lost.
+  - **Web.** The Settings → Integrations GitHub field is a password input with Save and Remove buttons and shows "saved" when a token is stored. The GitHub page checks `githubConnected`.
+  - **Docs.** `CAL_SECRET_KEY_FILE` is in the README config table. The `deploy/compose.yml` header notes that `cal-data` now holds `secret.key`. `openapi.yaml` documents the new endpoint.
+- **Compatibility:**
+  - Existing installs migrate automatically on first start. The key moves to `<DATA_DIR>/secret.key`, so back up the data volume together with the database: a database restored without that file can't decrypt stored credentials.
+  - Rolling back to an older build after this migration needs the old key back in `server_config`.
+  - Migration `10002` Down drops the encrypted GitHub token, which then has to be entered again.
+  - API: settings carry `githubConnected` instead of `githubToken`.
+- **Upstreamable:** yes.
+- **Tests:** `secrets_test.go`:
+  - Legacy database (key in `server_config`, an encrypted CalDAV password, a plaintext GitHub token) with no key file: the key is adopted into a 0600 file, the password still decrypts, the token is encrypted, and the legacy key is gone.
+  - The same database with a different provided key: values are re-encrypted.
+  - A restart with the same key works, while a different or missing key file returns `ErrSecretKeyMismatch` and creates no new file.
+  - `TestGitHubTokenWriteOnly`: set, the `githubConnected` flag, a full settings save with `githubToken` that doesn't change it, no token in `/api/settings` or `/api/export`, no API or widget token in the export, invalid token → 400, and remove.
+
+### FC-027 — Closing linked GitHub issues is opt-in
+
+- **Why:** completing a board card linked to a GitHub issue always closed that issue on GitHub with the user's token. It's a write to an external service that users may not expect, made whenever a GitHub token was set for reading the inbox.
+- **What changed:**
+  - Migration `10003` adds `settings.github_close_issues BOOLEAN NOT NULL DEFAULT false`, exposed as `githubCloseIssues`.
+  - `updateEntry` closes the linked issue only when it's on.
+  - The web Settings → Integrations section gets the switch "Close the GitHub issue when its card is completed".
+  - `ghAPI` is a variable so tests can point it at a stub.
+- **Compatibility:** behaviour change. Existing users who relied on auto-close must turn it on. Reading GitHub (inbox, card sync from GitHub to Cal) is unchanged.
+- **Upstreamable:** yes.
+- **Tests:** `TestGitHubCloseIssueIsOptIn`, against a stub GitHub API: completing a linked card sends no PATCH with the setting off and exactly one with it on.
+
+### FC-028 — One token per capability
+
+- **Why:** two tokens covered four capabilities.
+  - The API token was the only credential for both `/api/mcp` (full read/write over entries, people, files and the GitHub inbox) and `/api/intake`, which is meant to be handed to a mail-forwarding service. Leaking the intake URL therefore leaked the whole account.
+  - The widget token, described as read-only for the Today widget, also unlocked `/api/feed.ics`, the export of all tasks and events with descriptions.
+- **What changed:**
+  - Migration `10004` adds `settings.intake_token` and `settings.feed_token`, seeded from `api_token` and `widget_token` respectively.
+  - `store.UserByToken(kind, token)` and `store.RegenerateToken(kind)` replace the per-token functions. Kinds are `TokenAPI` (MCP), `TokenIntake` (`/api/intake`, create-only), `TokenFeed` (`/api/feed.ics`) and `TokenWidget` (`/api/widget/today`). An empty token never matches.
+  - New rotate endpoints `POST /api/settings/intake-token` and `/api/settings/feed-token`. One `rotateToken` handler serves all four.
+  - `/api/intake` also accepts the token as `Authorization: Bearer`.
+  - Exports and backups blank the new tokens too, and the web settings cache never stores them.
+  - Web Settings: the intake URL is shown with its own copy and rotate buttons, and the ICS URL uses the feed token with its own rotate button.
+  - `openapi.yaml` is updated.
+- **Compatibility:**
+  - Existing intake and ICS URLs keep working, because the new tokens start as copies.
+  - Rotating the API token no longer changes the intake URL, and rotating the widget token no longer changes the ICS URL.
+  - API: settings gain `intakeToken` and `feedToken`.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestTokensAreScoped`: the four tokens are distinct, and each one opens only its own endpoint (intake, feed, widget, MCP). Intake also works with a Bearer header, and rotation retires the old intake token.
+  - `TestScopedTokenMigrationKeepsURLs`: on a database migrated to `10003` with an existing user, `10004` seeds `intake_token = api_token` and `feed_token = widget_token`.
+
+### FC-029 — Sessions stored as hashes
+
+- **Why:** sessions were stored as the raw token: the `sessions.id` UUID that clients send as cookie or Bearer. Anyone with read access to the database or a dump could sign in as any user. `GET /api/sessions` also returned those IDs, so the session list handed every one of the user's tokens to any script running in the page.
+- **What changed:**
+  - Migration `10005` changes `sessions.id` to `TEXT` and replaces each existing value with `encode(sha256(token), 'hex')` in place, so current logins stay valid.
+  - The store hashes the presented token everywhere (`sessionKey`): `CreateSession` returns the token and stores only its hash, and `UserBySession`, `TouchSession`, `DeleteSession` and `RevokeOtherSessions` hash their argument.
+  - `ListSessions` returns the hash as the session's public ID, and `RevokeSession` takes that ID. The hash can't be used to sign in.
+- **Compatibility:**
+  - Nobody is signed out by the upgrade.
+  - Session IDs in `/api/sessions` are now 64-character hex strings. The web UI only uses them as keys for revoking.
+  - Down migration: hashes can't be reversed, so it deletes all sessions and everyone signs in again.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestSessionsListedByHash`: the list doesn't contain the token, the current entry's ID is SHA-256(token), and revoking by that ID ends the session.
+  - `TestSessionHashMigrationKeepsLogins`: on a database at `10004` with an old-style session row, migrating stores the hash and the pre-upgrade token still signs in.
+
+### FC-030 — Logout ends Bearer sessions too
+
+- **Why:** `POST /api/auth/logout` deleted the server-side session only when it arrived as the `cal_session` cookie. The native apps authenticate with a Bearer token, so their logout only cleared local state and the token stayed valid for up to 30 days.
+- **What changed:** `httpapi/server.go` `logout` ends the session presented either as the cookie or as `Authorization: Bearer`.
+- **Compatibility:** none for the web app. Native logouts now also end the session on the server.
+- **Upstreamable:** yes.
+- **Tests:** `TestBearerLogoutEndsSession`: after a Bearer logout, the token gets 401. Before the fix it still got 200.

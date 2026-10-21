@@ -414,7 +414,7 @@ func (s *Server) mcpAuth(c *gin.Context) (store.User, bool) {
 	if token == "" || token == c.GetHeader("Authorization") {
 		return store.User{}, false
 	}
-	user, err := s.store.UserByApiToken(c.Request.Context(), token)
+	user, err := s.store.UserByToken(c.Request.Context(), store.TokenAPI, token)
 	if err != nil {
 		return store.User{}, false
 	}
@@ -838,15 +838,15 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 		respond(toolText(string(data), false))
 
 	case "github_inbox":
-		st, err := s.store.Settings(ctx, user.ID)
-		if err != nil || st.GithubToken == "" {
+		token, err := s.store.GitHubToken(ctx, user.ID)
+		if err != nil || token == "" {
 			fail("no github token in settings")
 			return
 		}
 		var res struct {
 			Items []ghIssue `json:"items"`
 		}
-		if err := ghGet(ctx, st.GithubToken, "/search/issues?q="+url.QueryEscape("is:open involves:@me")+"&per_page=50", &res); err != nil {
+		if err := ghGet(ctx, token, "/search/issues?q="+url.QueryEscape("is:open involves:@me")+"&per_page=50", &res); err != nil {
 			fail("github fetch failed")
 			return
 		}
@@ -877,6 +877,10 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 		}
 		if !s.store.BoardExists(ctx, user.ID, args.BoardID) {
 			fail("unknown board")
+			return
+		}
+		if args.ColumnID != "" && !s.store.ColumnInBoard(ctx, user.ID, args.BoardID, args.ColumnID) {
+			fail("column not on this board")
 			return
 		}
 		if args.Date == "" {
@@ -914,6 +918,10 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 		entry, err := s.store.Entry(ctx, user.ID, args.ID)
 		if err != nil || entry.BoardID == nil {
 			fail("card not found")
+			return
+		}
+		if !s.store.ColumnInBoard(ctx, user.ID, *entry.BoardID, args.ColumnID) {
+			fail("column not on this board")
 			return
 		}
 		if err := s.store.MoveCard(ctx, user.ID, args.ID, *entry.BoardID, &args.ColumnID, args.Position); err != nil {

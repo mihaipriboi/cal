@@ -106,8 +106,12 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 	authed.POST("/feeds/:id/refresh", server.refreshFeed)
 	authed.GET("/feed-events", server.feedEvents)
 	authed.POST("/import", server.importICS)
-	authed.POST("/settings/widget-token", server.rotateWidgetToken)
-	authed.POST("/settings/api-token", server.rotateApiToken)
+	authed.POST("/settings/widget-token", server.rotateToken(store.TokenWidget, "widgetToken"))
+	authed.POST("/settings/api-token", server.rotateToken(store.TokenAPI, "apiToken"))
+	authed.POST("/settings/intake-token", server.rotateToken(store.TokenIntake, "intakeToken"))
+	authed.POST("/settings/feed-token", server.rotateToken(store.TokenFeed, "feedToken"))
+	authed.PUT("/settings/github-token", server.setGitHubToken)
+	authed.DELETE("/settings/github-token", server.setGitHubToken)
 	authed.POST("/restore", server.restoreJSON)
 	authed.GET("/sessions", server.listSessions)
 	authed.DELETE("/sessions/:id", server.revokeSession)
@@ -313,9 +317,15 @@ func (s *Server) login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": user, "session": session})
 }
 
+// logout ends the caller's session on the server, whether it came as the
+// web cookie or as the native apps' Bearer token.
 func (s *Server) logout(c *gin.Context) {
-	if cookie, err := c.Cookie("cal_session"); err == nil {
-		_ = s.store.DeleteSession(c.Request.Context(), cookie)
+	token, err := c.Cookie("cal_session")
+	if err != nil || token == "" {
+		token = bearerOrQuery(c)
+	}
+	if token != "" {
+		_ = s.store.DeleteSession(c.Request.Context(), token)
 	}
 	s.writeSessionCookie(c, "", -1)
 	c.Status(http.StatusNoContent)
@@ -450,8 +460,12 @@ func (s *Server) updateEntry(c *gin.Context) {
 	if entry.BoardID != nil {
 		if patch.Completed != nil && *patch.Completed && entry.LinkURL != "" && strings.Contains(entry.LinkURL, "github.com") {
 			go func() {
-				if st, err := s.store.Settings(context.Background(), currentUser(c).ID); err == nil && st.GithubToken != "" {
-					ghCloseIssue(context.Background(), st.GithubToken, entry.LinkURL)
+				userID := currentUser(c).ID
+				if st, err := s.store.Settings(context.Background(), userID); err != nil || !st.GithubCloseIssues {
+					return
+				}
+				if token, err := s.store.GitHubToken(context.Background(), userID); err == nil && token != "" {
+					ghCloseIssue(context.Background(), token, entry.LinkURL)
 				}
 			}()
 		}
@@ -526,12 +540,17 @@ func (s *Server) settings(c *gin.Context) {
 }
 
 func (s *Server) updateSettings(c *gin.Context) {
-	var input store.Settings
-	if !bind(c, &input) || !validSettings(input) {
+	var input struct {
+		store.Settings
+		// Ignored: the token has its own write-only endpoint, but older
+		// clients still send it with every settings save.
+		GithubToken *string `json:"githubToken"`
+	}
+	if !bind(c, &input) || !validSettings(input.Settings) {
 		c.String(http.StatusBadRequest, "invalid settings")
 		return
 	}
-	settings, err := s.store.UpdateSettings(c.Request.Context(), currentUser(c).ID, input)
+	settings, err := s.store.UpdateSettings(c.Request.Context(), currentUser(c).ID, input.Settings)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed to update settings")
 		return
@@ -561,7 +580,7 @@ func (s *Server) export(c *gin.Context) {
 	payload := gin.H{
 		"exportedAt":       time.Now().UTC().Format(time.RFC3339),
 		"user":             user,
-		"settings":         settings,
+		"settings":         exportSettings(settings),
 		"entries":          entries,
 		"people":           people,
 		"personLinks":      links,
@@ -671,12 +690,18 @@ func (s *Server) writeSessionCookie(c *gin.Context, value string, maxAge int) {
 	})
 }
 
+// bearerOrQuery reads the native apps' session: the Bearer header, or
+// ?session= on GET/HEAD only — that form exists for <img src> and file links,
+// which can't send headers, and never needs to authorize a write.
 func bearerOrQuery(c *gin.Context) string {
 	h := c.GetHeader("Authorization")
 	if strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
 	}
-	return strings.TrimSpace(c.Query("session"))
+	if m := c.Request.Method; m == http.MethodGet || m == http.MethodHead {
+		return strings.TrimSpace(c.Query("session"))
+	}
+	return ""
 }
 
 func currentUser(c *gin.Context) store.User {

@@ -61,7 +61,7 @@ func writeBackups(ctx context.Context, s *store.Store, dataDir string) error {
 		// skips file rows (no binaries in the archive).
 		files, _ := s.ListFiles(ctx, userID)
 		payload, _ := json.MarshalIndent(map[string]any{
-			"userId": userID, "settings": settings, "entries": entries, "exportedAt": time.Now(),
+			"userId": userID, "settings": exportSettings(settings), "entries": entries, "exportedAt": time.Now(),
 			"people": people, "personLinks": links, "personTimeline": timeline, "files": files,
 		}, "", "  ")
 		path := filepath.Join(dir, "cal-"+userID+"-"+day+".json")

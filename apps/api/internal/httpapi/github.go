@@ -19,7 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const ghAPI = "https://api.github.com"
+// ghAPI is a var so tests can point it at a stub.
+var ghAPI = "https://api.github.com"
 
 func ghClient() *http.Client { return &http.Client{Timeout: 10 * time.Second} }
 
@@ -43,12 +44,36 @@ func ghGet(ctx context.Context, token, path string, out any) error {
 }
 
 func (s *Server) ghToken(c *gin.Context) (string, bool) {
-	st, err := s.store.Settings(c.Request.Context(), currentUser(c).ID)
-	if err != nil || st.GithubToken == "" {
+	token, err := s.store.GitHubToken(c.Request.Context(), currentUser(c).ID)
+	if err != nil || token == "" {
 		c.String(http.StatusNotImplemented, "set a GitHub PAT in Settings first")
 		return "", false
 	}
-	return st.GithubToken, true
+	return token, true
+}
+
+// setGitHubToken stores (PUT) or removes (DELETE) the user's GitHub token.
+// It's write-only: settings responses only say whether one is set.
+func (s *Server) setGitHubToken(c *gin.Context) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if c.Request.Method == http.MethodPut {
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.String(http.StatusBadRequest, "invalid json")
+			return
+		}
+		body.Token = strings.TrimSpace(body.Token)
+		if body.Token == "" || len(body.Token) > 255 || strings.ContainsFunc(body.Token, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+			c.String(http.StatusBadRequest, "invalid token")
+			return
+		}
+	}
+	if err := s.store.SetGitHubToken(c.Request.Context(), currentUser(c).ID, body.Token); err != nil {
+		c.String(http.StatusInternalServerError, "failed to save token")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"githubConnected": body.Token != ""})
 }
 
 type ghIssue struct {
@@ -233,11 +258,13 @@ func GitHubSyncLoop(ctx context.Context, s *store.Store, every time.Duration) {
 		}
 	}
 	tick()
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.NewTicker(every).C:
+		case <-ticker.C:
 			tick()
 		}
 	}

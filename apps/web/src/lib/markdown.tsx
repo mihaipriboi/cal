@@ -45,7 +45,7 @@ function inline(text: string, onWiki?: (title: string) => void): ReactNode[] {
       const alt = tok.slice(2, end);
       const src = tok.slice(end + 2, -1);
       // Only render same-origin uploads or http(s) — nothing else loads.
-      if (src.startsWith("/") || /^https?:\/\//i.test(src)) {
+      if (isRelative(src) || /^https?:\/\//i.test(src)) {
         out.push(<img key={k()} src={resolveAsset(src)} alt={alt} className="md-img" />);
       } else {
         out.push(alt);
@@ -55,9 +55,13 @@ function inline(text: string, onWiki?: (title: string) => void): ReactNode[] {
       const label = tok.slice(1, end);
       const href = tok.slice(end + 2, -1);
       out.push(
-        <a key={k()} href={href} target="_blank" rel="noreferrer">
-          {label}
-        </a>,
+        safeHref(href) ? (
+          <a key={k()} href={href} target="_blank" rel="noreferrer">
+            {label}
+          </a>
+        ) : (
+          label
+        ),
       );
     } else {
       out.push(<em key={k()}>{tok.slice(1, -1)}</em>);
@@ -68,13 +72,26 @@ function inline(text: string, onWiki?: (title: string) => void): ReactNode[] {
   return out;
 }
 
-// /api/… paths resolve to the stored remote server + session on native builds.
+// A single leading "/" is same-origin; "//host" and "/\\host" are another host.
+function isRelative(url: string): boolean {
+  return /^\/(?![/\\])/.test(url);
+}
+
+// Links may be http(s), mailto or same-origin; anything else (javascript:,
+// data:, intent:, …) renders as plain text.
+export function safeHref(href: string): boolean {
+  return isRelative(href) || /^(https?:\/\/|mailto:)/i.test(href.trim());
+}
+
+// /api/… paths resolve to the stored remote server + session on native builds
+// (cal:server is only set there); the web app authenticates by cookie.
 function resolveAsset(src: string): string {
   if (!src.startsWith("/api/")) return src;
   try {
     const server = localStorage.getItem("cal:server");
+    if (!server) return src;
     const session = localStorage.getItem("cal:session");
-    const base = server ? server + src : src;
+    const base = server + src;
     return session ? `${base}${src.includes("?") ? "&" : "?"}session=${encodeURIComponent(session)}` : base;
   } catch {
     return src;

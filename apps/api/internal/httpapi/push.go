@@ -129,7 +129,7 @@ func (s *Server) unsubscribePush(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&body)
 	if body.Endpoint != "" {
-		_ = s.store.DeletePushSub(c.Request.Context(), body.Endpoint)
+		_ = s.store.DeleteUserPushSub(c.Request.Context(), currentUser(c).ID, body.Endpoint)
 	}
 	c.Status(http.StatusNoContent)
 }

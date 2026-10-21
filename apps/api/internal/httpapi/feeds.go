@@ -317,7 +317,7 @@ func (s *Server) importICS(c *gin.Context) {
 
 // widgetToday is the token-gated read used by the embeddable Today widget.
 func (s *Server) widgetToday(c *gin.Context) {
-	user, err := s.store.UserByWidgetToken(c.Request.Context(), c.Query("token"))
+	user, err := s.store.UserByToken(c.Request.Context(), store.TokenWidget, c.Query("token"))
 	if errors.Is(err, store.ErrNotFound) {
 		c.String(http.StatusUnauthorized, "invalid widget token")
 		return
@@ -334,13 +334,17 @@ func (s *Server) widgetToday(c *gin.Context) {
 	c.JSON(http.StatusOK, entries)
 }
 
-func (s *Server) rotateWidgetToken(c *gin.Context) {
-	token, err := s.store.RegenerateWidgetToken(c.Request.Context(), currentUser(c).ID)
-	if err != nil {
-		c.String(http.StatusInternalServerError, "failed")
-		return
+// rotateToken replaces one capability token (store.Token*), answering
+// {<field>: newToken}.
+func (s *Server) rotateToken(column, field string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token, err := s.store.RegenerateToken(c.Request.Context(), currentUser(c).ID, column)
+		if err != nil {
+			c.String(http.StatusInternalServerError, "failed")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{field: token})
 	}
-	c.JSON(http.StatusOK, gin.H{"widgetToken": token})
 }
 
 // RefreshFeedsLoop re-fetches every subscribed feed on an interval so the
@@ -379,13 +383,4 @@ func RefreshFeedsLoop(ctx context.Context, s *store.Store, every time.Duration) 
 			tick()
 		}
 	}
-}
-
-func (s *Server) rotateApiToken(c *gin.Context) {
-	token, err := s.store.RegenerateApiToken(c.Request.Context(), currentUser(c).ID)
-	if err != nil {
-		c.String(http.StatusInternalServerError, "failed")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"apiToken": token})
 }

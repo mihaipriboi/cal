@@ -40,6 +40,8 @@ export function SettingsPage() {
   const restore = usePlanner((state) => state.restore);
   const api = usePlanner((state) => state.api);
   const rotateToken = usePlanner((state) => state.rotateToken);
+  const setGitHubToken = usePlanner((state) => state.setGitHubToken);
+  const [ghToken, setGhToken] = useState("");
   const toast = usePlanner((state) => state.toast);
   const user = usePlanner((state) => state.user);
   const logout = usePlanner((state) => state.logout);
@@ -307,7 +309,8 @@ export function SettingsPage() {
 
   const origin = api.remote || location.origin;
   const widgetUrl = `${origin}/widget/today?token=${settings.widgetToken}`;
-  const icsUrl = `${origin}/api/feed.ics?token=${settings.widgetToken}`;
+  const icsUrl = `${origin}/api/feed.ics?token=${settings.feedToken ?? ""}`;
+  const intakeUrl = `${origin}/api/intake?token=${settings.intakeToken ?? ""}`;
   const mcpConfig = JSON.stringify(
     { mcpServers: { cal: { url: `${origin}/api/mcp`, headers: { Authorization: `Bearer ${settings.apiToken}` } } } },
     null,
@@ -435,15 +438,43 @@ export function SettingsPage() {
         <section className="panel">
           <h3>Integrations</h3>
           <div className="settings-grid">
-            <label className="field">
-              <span>GitHub token</span>
-              <input
-                type="password"
-                className="input"
-                placeholder="Personal access token — issues & PRs"
-                value={settings.githubToken ?? ""}
-                onChange={(e) => set({ githubToken: e.target.value })}
-              />
+            <div className="field">
+              <span>GitHub token{settings.githubConnected ? " — saved" : ""}</span>
+              <div className="token-row">
+                <input
+                  type="password"
+                  className="input"
+                  aria-label="GitHub token"
+                  autoComplete="off"
+                  placeholder={settings.githubConnected ? "Paste a new token to replace it" : "Personal access token — issues & PRs"}
+                  value={ghToken}
+                  onChange={(e) => setGhToken(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!ghToken.trim()}
+                  onClick={() => void setGitHubToken(ghToken.trim()).then((ok) => ok && setGhToken(""))}
+                >
+                  Save
+                </button>
+                {settings.githubConnected && (
+                  <button type="button" className="btn btn-secondary" onClick={() => void setGitHubToken("")}>
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+            <label className="switch-row">
+              Close the GitHub issue when its card is completed
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  checked={settings.githubCloseIssues ?? false}
+                  onChange={(e) => set({ githubCloseIssues: e.target.checked })}
+                />
+                <i />
+              </span>
             </label>
             <label className="field">
               <span>Invidious instance</span>
@@ -807,9 +838,18 @@ export function SettingsPage() {
             </button>
           </div>
           <p className="panel-note" style={{ marginTop: 8 }}>
-            Email-to-task: forward mail to <code>POST /api/intake?token=&lt;api token&gt;</code> with
-            {" "}<code>{"{subject, text}"}</code> — lands as a task tagged <code>inbox</code>.
+            Email-to-task: POST <code>{"{subject, text}"}</code> to this URL — lands as a task tagged{" "}
+            <code>inbox</code>. Its token can only create tasks.
           </p>
+          <div className="token-row">
+            <code className="token">{intakeUrl}</code>
+            <button type="button" className="icon-btn" aria-label="Copy intake URL" onClick={() => copy(intakeUrl, "URL")}>
+              <Copy size={14} />
+            </button>
+            <button type="button" className="icon-btn" aria-label="Rotate intake token" onClick={() => void rotateToken("intake")}>
+              <RefreshCw size={14} />
+            </button>
+          </div>
         </section>
 
         <section className="panel">
@@ -1006,12 +1046,15 @@ export function SettingsPage() {
           <pre className="code-block" tabIndex={0}>{`<iframe src="${widgetUrl}" style="border:0;width:100%;height:320px"></iframe>`}</pre>
           <p className="panel-note" style={{ marginTop: 10 }}>
             Or subscribe to Cal itself in any calendar app — this URL serves a live .ics feed of your tasks and
-            events:
+            events (its own token, separate from the widget's):
           </p>
           <div className="token-row">
             <code className="token">{icsUrl}</code>
             <button type="button" className="icon-btn" aria-label="Copy feed URL" onClick={() => copy(icsUrl, "URL")}>
               <Copy size={14} />
+            </button>
+            <button type="button" className="icon-btn" aria-label="Rotate feed token" onClick={() => void rotateToken("feed")}>
+              <RefreshCw size={14} />
             </button>
           </div>
         </section>

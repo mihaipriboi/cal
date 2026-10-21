@@ -10,7 +10,9 @@
 # database, cal-data holds uploads and backups — back up both. Rather run a
 # single container? The image has embedded Postgres: drop DATABASE_URL and
 # the db service, and only cal-data is used (that is what install.sh-free
-# `docker run` setups get by default).
+# `docker run` setups get by default). The Postgres binaries are then
+# downloaded on first start, unless the image was built with
+# --build-arg PREWARM_EMBEDDED_PG=true.
 
 services:
   cal:

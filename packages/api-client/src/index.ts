@@ -154,9 +154,18 @@ export interface Settings {
   quotaMb?: number;
   digestTime?: string;
   defaultRate?: number;
-  githubToken?: string;
+  /** A GitHub token is stored; the token itself is write-only. */
+  githubConnected?: boolean;
+  /** Completing a card closes its linked GitHub issue (off by default). */
+  githubCloseIssues?: boolean;
+  /** Today's agenda for widgets. */
   widgetToken: string;
+  /** MCP: full read/write access. */
   apiToken: string;
+  /** POST /api/intake: create tasks only. */
+  intakeToken?: string;
+  /** GET /api/feed.ics: read-only calendar export. */
+  feedToken?: string;
   /** Feature modules on/off; absent key = enabled. */
   modules?: Record<string, boolean>;
   /** Calendar view fresh devices open on; per-device last-used view still wins. */
@@ -439,6 +448,9 @@ export class CalApi {
   // a server URL + Bearer session. Same-origin web uses neither.
   private server = "";
   private session = "";
+  // Same-origin web authenticates by the HttpOnly cookie alone; keeping the
+  // token in script-readable storage or in URLs would only expose it.
+  private cookieOnly = false;
 
   constructor(private readonly baseUrl = "/api") {
     try {
@@ -458,7 +470,9 @@ export class CalApi {
       const servedByServer = /^https?:$/.test(proto) && !appShell;
       this.server = servedByServer ? "" : (localStorage.getItem("cal:server") ?? "");
       if (servedByServer) localStorage.removeItem("cal:server");
-      this.session = localStorage.getItem("cal:session") ?? "";
+      this.cookieOnly = servedByServer;
+      if (servedByServer) localStorage.removeItem("cal:session");
+      else this.session = localStorage.getItem("cal:session") ?? "";
     } catch {
       // storage unavailable
     }
@@ -477,9 +491,9 @@ export class CalApi {
   }
 
   setSession(token: string) {
-    this.session = token;
+    this.session = this.cookieOnly ? "" : token;
     try {
-      if (token) localStorage.setItem("cal:session", token);
+      if (this.session) localStorage.setItem("cal:session", this.session);
       else localStorage.removeItem("cal:session");
     } catch { /* ignore */ }
   }
@@ -1142,6 +1156,24 @@ export class CalApi {
   async rotateApiToken(): Promise<string> {
     const out = await this.request<{ apiToken: string }>("/settings/api-token", { method: "POST" });
     return out.apiToken;
+  }
+
+  async rotateIntakeToken(): Promise<string> {
+    const out = await this.request<{ intakeToken: string }>("/settings/intake-token", { method: "POST" });
+    return out.intakeToken;
+  }
+
+  async rotateFeedToken(): Promise<string> {
+    const out = await this.request<{ feedToken: string }>("/settings/feed-token", { method: "POST" });
+    return out.feedToken;
+  }
+
+  /** Stores the GitHub token ("" removes it); returns whether one is set. */
+  async setGitHubToken(token: string): Promise<boolean> {
+    const out = token
+      ? await this.request<{ githubConnected: boolean }>("/settings/github-token", { method: "PUT", body: { token } })
+      : await this.request<{ githubConnected: boolean }>("/settings/github-token", { method: "DELETE" });
+    return out.githubConnected;
   }
 
   private headers(withJson: boolean): Record<string, string> {

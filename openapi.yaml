@@ -711,6 +711,44 @@ paths:
                 properties:
                   apiToken:
                     type: string
+  /settings/github-token:
+    put:
+      summary: Store the GitHub token (encrypted; never returned — settings only report githubConnected)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  maxLength: 255
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  githubConnected:
+                    type: boolean
+        "400":
+          description: Empty or malformed token
+    delete:
+      summary: Remove the stored GitHub token
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  githubConnected:
+                    type: boolean
   /widget/today:
     get:
       summary: Token-gated read-only agenda for the embeddable widget
@@ -809,9 +847,35 @@ paths:
           description: Synced
         "502":
           description: Remote unreachable
+  /settings/intake-token:
+    post:
+      summary: Rotate the create-only email intake token
+      responses:
+        "200":
+          description: New token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  intakeToken:
+                    type: string
+  /settings/feed-token:
+    post:
+      summary: Rotate the read-only ICS feed token
+      responses:
+        "200":
+          description: New token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedToken:
+                    type: string
   /feed.ics:
     get:
-      summary: Subscribable .ics feed of own tasks/events (widget token auth)
+      summary: Subscribable .ics feed of own tasks/events (feed token auth, settings.feedToken)
       parameters:
         - name: token
           in: query
@@ -1239,7 +1303,7 @@ paths:
       summary: Global search — entries + files + boards + people
   /github/inbox:
     get:
-      summary: Open issues+PRs involving the user (needs settings.githubToken)
+      summary: Open issues+PRs involving the user (needs a token set via /settings/github-token)
   /github/activity:
     get:
       summary: Login + events this week
@@ -1274,10 +1338,10 @@ paths:
       parameters:
         - name: token
           in: query
-          required: true
+          required: false
           schema:
             type: string
-          description: API token (settings.apiToken)
+          description: "Intake token (settings.intakeToken; create-only). May be sent as `Authorization: Bearer` instead."
       responses:
         "201":
           description: Task created
@@ -1664,6 +1728,18 @@ components:
         apiToken:
           type: string
           description: Full-access bearer token for the MCP endpoint
+        intakeToken:
+          type: string
+          description: Create-only token for /intake
+        feedToken:
+          type: string
+          description: Read-only token for /feed.ics
+        githubConnected:
+          type: boolean
+          description: A GitHub token is stored (the token itself is write-only)
+        githubCloseIssues:
+          type: boolean
+          description: Completing a card closes its linked GitHub issue
         defaultView:
           enum: [month, week, day]
           description: Calendar view fresh devices open on (default month)

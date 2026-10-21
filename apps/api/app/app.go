@@ -7,6 +7,8 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"cal/apps/api/internal/caldav"
@@ -30,6 +32,10 @@ func New(ctx context.Context, databaseURL, dataDir string) (http.Handler, func()
 		return nil, nil, err
 	}
 	s := store.New(db)
+	if err := s.InitSecrets(ctx, secretKeyFile(dataDir)); err != nil {
+		db.Close()
+		return nil, nil, err
+	}
 	go httpapi.RefreshFeedsLoop(context.Background(), s, 30*time.Minute)
 	go httpapi.PushLoop(context.Background(), s, time.Minute)
 	go caldavLoop(context.Background(), s)
@@ -39,6 +45,16 @@ func New(ctx context.Context, databaseURL, dataDir string) (http.Handler, func()
 
 	router := httpapi.New(s, calendar.NewHolidayCache())
 	return router, db.Close, nil
+}
+
+// secretKeyFile is where the credential encryption key lives: outside the
+// database, so a DB dump alone decrypts nothing. CAL_SECRET_KEY_FILE
+// overrides the default <dataDir>/secret.key (e.g. a mounted secret).
+func secretKeyFile(dataDir string) string {
+	if p := os.Getenv("CAL_SECRET_KEY_FILE"); p != "" {
+		return p
+	}
+	return filepath.Join(dataDir, "secret.key")
 }
 
 // migrate applies pending migrations via the embedded FS — idempotent, so the

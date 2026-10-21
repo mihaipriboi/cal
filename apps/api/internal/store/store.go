@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -19,7 +20,8 @@ var ErrInvalid = errors.New("invalid entry")
 var ErrRegistrationClosed = errors.New("registration is closed")
 
 type Store struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	key []byte // credential encryption key, set by InitSecrets
 }
 
 type User struct {
@@ -92,9 +94,19 @@ type Settings struct {
 	QuotaMB      int      `json:"quotaMb"`
 	DigestTime   string   `json:"digestTime"` // "HH:MM" or ""
 	DefaultRate  *float64 `json:"defaultRate,omitempty"`
-	GithubToken  string   `json:"githubToken"` // PAT; never logged
-	WidgetToken  string   `json:"widgetToken"`
-	ApiToken     string   `json:"apiToken"`
+	// GithubConnected reports whether a GitHub token is stored. The token is
+	// write-only: set via SetGitHubToken, read server-side via GitHubToken.
+	GithubConnected bool `json:"githubConnected"`
+	// GithubCloseIssues closes a card's linked GitHub issue when the card is
+	// completed (a write to GitHub). Off unless chosen.
+	GithubCloseIssues bool `json:"githubCloseIssues"`
+	// One token per capability: ApiToken = MCP (full access), IntakeToken =
+	// create tasks via /api/intake, FeedToken = read the ICS export,
+	// WidgetToken = today's agenda for widgets.
+	WidgetToken string `json:"widgetToken"`
+	ApiToken    string `json:"apiToken"`
+	IntakeToken string `json:"intakeToken"`
+	FeedToken   string `json:"feedToken"`
 	// Modules gates feature areas; absent key = enabled.
 	Modules         map[string]bool `json:"modules,omitempty"`
 	ActiveWorkspace *string         `json:"activeWorkspace,omitempty"`
@@ -237,14 +249,22 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, string, er
 	return u, hash, err
 }
 
-func (s *Store) UserBySession(ctx context.Context, sessionID string) (User, error) {
+// sessionKey is how a session token is stored: its SHA-256, hex-encoded. The
+// token itself exists only on the client; the key doubles as the session's
+// public ID in ListSessions/RevokeSession.
+func sessionKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Store) UserBySession(ctx context.Context, token string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
 		SELECT users.id::text, users.email, users.is_admin, users.created_at
 		FROM sessions
 		JOIN users ON users.id = sessions.user_id
 		WHERE sessions.id = $1 AND sessions.expires_at > now()
-	`, sessionID).Scan(&u.ID, &u.Email, &u.IsAdmin, &u.CreatedAt)
+	`, sessionKey(token)).Scan(&u.ID, &u.Email, &u.IsAdmin, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -253,12 +273,12 @@ func (s *Store) UserBySession(ctx context.Context, sessionID string) (User, erro
 
 func (s *Store) CreateSession(ctx context.Context, userID, userAgent string) (string, error) {
 	_, _ = s.db.Exec(ctx, `DELETE FROM sessions WHERE expires_at < now()`)
-	id := uuid.NewString()
+	token := uuid.NewString()
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO sessions (id, user_id, expires_at, user_agent, last_seen_at)
 		VALUES ($1, $2, now() + interval '30 days', nullif($3, ''), now())
-	`, id, userID, userAgent)
-	return id, err
+	`, sessionKey(token), userID, userAgent)
+	return token, err
 }
 
 // SessionInfo describes one live session for the security panel.
@@ -270,14 +290,15 @@ type SessionInfo struct {
 	Current   bool       `json:"current"`
 }
 
-// ListSessions returns the user's live sessions; currentID marks "this one".
-func (s *Store) ListSessions(ctx context.Context, userID, currentID string) ([]SessionInfo, error) {
+// ListSessions returns the user's live sessions, identified by their stored
+// key (not the token); currentToken marks "this one".
+func (s *Store) ListSessions(ctx context.Context, userID, currentToken string) ([]SessionInfo, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, user_agent, created_at, last_seen_at, id::text = $2
+		SELECT id, user_agent, created_at, last_seen_at, id = $2
 		FROM sessions
 		WHERE user_id = $1 AND expires_at > now()
 		ORDER BY last_seen_at DESC NULLS LAST
-	`, userID, currentID)
+	`, userID, sessionKey(currentToken))
 	if err != nil {
 		return nil, err
 	}
@@ -294,11 +315,12 @@ func (s *Store) ListSessions(ctx context.Context, userID, currentID string) ([]S
 }
 
 // TouchSession refreshes last_seen_at (cheap activity signal).
-func (s *Store) TouchSession(ctx context.Context, sessionID string) {
-	_, _ = s.db.Exec(ctx, `UPDATE sessions SET last_seen_at = now() WHERE id = $1`, sessionID)
+func (s *Store) TouchSession(ctx context.Context, token string) {
+	_, _ = s.db.Exec(ctx, `UPDATE sessions SET last_seen_at = now() WHERE id = $1`, sessionKey(token))
 }
 
-// RevokeSession deletes one session owned by the user.
+// RevokeSession deletes one session owned by the user, by its public ID (the
+// stored key from ListSessions).
 func (s *Store) RevokeSession(ctx context.Context, userID, sessionID string) error {
 	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE id = $1 AND user_id = $2`, sessionID, userID)
 	return err
@@ -310,14 +332,16 @@ func (s *Store) ChangePassword(ctx context.Context, userID, newHash string) erro
 	return err
 }
 
-// RevokeOtherSessions deletes every session except the caller's.
-func (s *Store) RevokeOtherSessions(ctx context.Context, userID, keepID string) error {
-	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND id <> $2`, userID, keepID)
+// RevokeOtherSessions deletes every session except the one holding
+// keepToken ("" = revoke all).
+func (s *Store) RevokeOtherSessions(ctx context.Context, userID, keepToken string) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND id <> $2`, userID, sessionKey(keepToken))
 	return err
 }
 
-func (s *Store) DeleteSession(ctx context.Context, sessionID string) error {
-	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionID)
+// DeleteSession ends the session holding token (logout).
+func (s *Store) DeleteSession(ctx context.Context, token string) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionKey(token))
 	return err
 }
 
@@ -794,18 +818,18 @@ func (s *Store) Settings(ctx context.Context, userID string) (Settings, error) {
 	var settings Settings
 	err := s.db.QueryRow(ctx, `
 		SELECT country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
-		       coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, coalesce(github_token,''),
+		       coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
 		       modules, active_workspace::text, default_view, nameday_country, invidious_url,
-		       coalesce(people_share_token, '') FROM settings WHERE user_id = $1
-	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubToken, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken)
+		       coalesce(people_share_token, ''), github_close_issues, intake_token, feed_token FROM settings WHERE user_id = $1
+	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken, &settings.GithubCloseIssues, &settings.IntakeToken, &settings.FeedToken)
 	return settings, err
 }
 
 func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Settings) (Settings, error) {
 	var out Settings
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, github_token, modules, active_workspace, default_view, nameday_country, invidious_url)
-		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, nullif($11, ''), coalesce($12::jsonb, '{}'::jsonb), $13::uuid, coalesce(nullif($14, ''), 'month'), $15, $16)
+		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, modules, active_workspace, default_view, nameday_country, invidious_url, github_close_issues)
+		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, coalesce($11::jsonb, '{}'::jsonb), $12::uuid, coalesce(nullif($13, ''), 'month'), $14, $15, $16)
 		ON CONFLICT (user_id) DO UPDATE
 		SET country = EXCLUDED.country,
 		    show_holidays = EXCLUDED.show_holidays,
@@ -816,61 +840,55 @@ func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Sett
 		    city = EXCLUDED.city,
 		    digest_time = EXCLUDED.digest_time,
 		    default_rate = EXCLUDED.default_rate,
-		    github_token = EXCLUDED.github_token,
 		    modules = EXCLUDED.modules,
 		    active_workspace = EXCLUDED.active_workspace,
 		    default_view = coalesce(EXCLUDED.default_view, 'month'),
 		    nameday_country = EXCLUDED.nameday_country,
-		    invidious_url = EXCLUDED.invidious_url
+		    invidious_url = EXCLUDED.invidious_url,
+		    github_close_issues = EXCLUDED.github_close_issues
 		RETURNING country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
-		          coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, coalesce(github_token,''),
-		          modules, active_workspace::text, default_view, nameday_country, invidious_url
-	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.GithubToken, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL).
-		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubToken, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL)
+		          coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
+		          modules, active_workspace::text, default_view, nameday_country, invidious_url, github_close_issues,
+		          intake_token, feed_token
+	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL, settings.GithubCloseIssues).
+		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL, &out.GithubCloseIssues, &out.IntakeToken, &out.FeedToken)
 	return out, err
 }
 
-// RegenerateWidgetToken rotates the read-only widget share token.
-func (s *Store) RegenerateWidgetToken(ctx context.Context, userID string) (string, error) {
+// Token kinds, each a settings column unlocking one capability.
+const (
+	TokenAPI    = "api_token"    // MCP: full read/write
+	TokenIntake = "intake_token" // POST /api/intake: create tasks
+	TokenFeed   = "feed_token"   // GET /api/feed.ics: read the ICS export
+	TokenWidget = "widget_token" // today's agenda for widgets
+)
+
+func validTokenColumn(column string) bool {
+	return column == TokenAPI || column == TokenIntake || column == TokenFeed || column == TokenWidget
+}
+
+// RegenerateToken rotates one of the user's capability tokens.
+func (s *Store) RegenerateToken(ctx context.Context, userID, column string) (string, error) {
+	if !validTokenColumn(column) {
+		return "", ErrInvalid
+	}
 	var token string
 	err := s.db.QueryRow(ctx, `
-		UPDATE settings SET widget_token = replace(gen_random_uuid()::text, '-', '')
-		WHERE user_id = $1 RETURNING widget_token
-	`, userID).Scan(&token)
+		UPDATE settings SET `+column+` = replace(gen_random_uuid()::text, '-', '')
+		WHERE user_id = $1 RETURNING `+column, userID).Scan(&token)
 	return token, err
 }
 
-// UserByWidgetToken resolves the owner of a widget share token (read-only use).
-func (s *Store) UserByWidgetToken(ctx context.Context, token string) (User, error) {
-	var u User
-	err := s.db.QueryRow(ctx, `
-		SELECT users.id::text, users.email
-		FROM settings JOIN users ON users.id = settings.user_id
-		WHERE settings.widget_token = $1
-	`, token).Scan(&u.ID, &u.Email)
-	if errors.Is(err, pgx.ErrNoRows) {
+// UserByToken resolves the owner of a capability token of the given kind.
+func (s *Store) UserByToken(ctx context.Context, column, token string) (User, error) {
+	if !validTokenColumn(column) || token == "" {
 		return User{}, ErrNotFound
 	}
-	return u, err
-}
-
-// RegenerateApiToken rotates the MCP/API access token.
-func (s *Store) RegenerateApiToken(ctx context.Context, userID string) (string, error) {
-	var token string
-	err := s.db.QueryRow(ctx, `
-		UPDATE settings SET api_token = replace(gen_random_uuid()::text, '-', '')
-		WHERE user_id = $1 RETURNING api_token
-	`, userID).Scan(&token)
-	return token, err
-}
-
-// UserByApiToken resolves the owner of an API token (used by the MCP endpoint).
-func (s *Store) UserByApiToken(ctx context.Context, token string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
 		SELECT users.id::text, users.email
 		FROM settings JOIN users ON users.id = settings.user_id
-		WHERE settings.api_token = $1
+		WHERE settings.`+column+` = $1
 	`, token).Scan(&u.ID, &u.Email)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
@@ -888,11 +906,16 @@ type PushSubscription struct {
 	Label    string `json:"label"`
 }
 
+// UpsertPushSub saves a browser's push subscription. An endpoint already held
+// by another user moves only when the keys match too: the same browser
+// switching accounts. Knowing an endpoint alone can't take it over.
 func (s *Store) UpsertPushSub(ctx context.Context, userID, endpoint, p256dh, auth, label string) error {
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, label)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, user_id = EXCLUDED.user_id, label = EXCLUDED.label
+		WHERE push_subscriptions.user_id = EXCLUDED.user_id
+		   OR (push_subscriptions.p256dh = EXCLUDED.p256dh AND push_subscriptions.auth = EXCLUDED.auth)
 	`, uuid.NewString(), userID, endpoint, p256dh, auth, label)
 	return err
 }
@@ -903,6 +926,13 @@ func (s *Store) DeletePushSubByID(ctx context.Context, userID, id string) error 
 	return err
 }
 
+// DeleteUserPushSub removes the user's own subscription for endpoint.
+func (s *Store) DeleteUserPushSub(ctx context.Context, userID, endpoint string) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2`, endpoint, userID)
+	return err
+}
+
+// DeletePushSub drops an endpoint the push service reported gone (any owner).
 func (s *Store) DeletePushSub(ctx context.Context, endpoint string) error {
 	_, err := s.db.Exec(ctx, `DELETE FROM push_subscriptions WHERE endpoint = $1`, endpoint)
 	return err
@@ -2240,9 +2270,10 @@ func (s *Store) GitHubLinkedCards(ctx context.Context, userID string) ([]Entry, 
 	return out, rows.Err()
 }
 
-// GitHubUsers — everyone with a token set (the sync loop iterates them).
+// GitHubUsers — everyone with a token set (the sync loop iterates them),
+// tokens decrypted. Undecryptable tokens are skipped.
 func (s *Store) GitHubUsers(ctx context.Context) ([]struct{ UserID, Token string }, error) {
-	rows, err := s.db.Query(ctx, `SELECT user_id::text, github_token FROM settings WHERE github_token IS NOT NULL AND github_token <> ''`)
+	rows, err := s.db.Query(ctx, `SELECT user_id::text, github_token_enc FROM settings WHERE github_token_enc IS NOT NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -2250,12 +2281,49 @@ func (s *Store) GitHubUsers(ctx context.Context) ([]struct{ UserID, Token string
 	var out []struct{ UserID, Token string }
 	for rows.Next() {
 		var r struct{ UserID, Token string }
-		if err := rows.Scan(&r.UserID, &r.Token); err != nil {
+		var enc string
+		if err := rows.Scan(&r.UserID, &enc); err != nil {
 			return nil, err
+		}
+		if r.Token, err = s.Decrypt(ctx, enc); err != nil {
+			continue
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GitHubToken returns the user's decrypted GitHub token ("" when none).
+func (s *Store) GitHubToken(ctx context.Context, userID string) (string, error) {
+	var enc *string
+	err := s.db.QueryRow(ctx, `SELECT github_token_enc FROM settings WHERE user_id = $1`, userID).Scan(&enc)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && enc == nil) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return s.Decrypt(ctx, *enc)
+}
+
+// SetGitHubToken stores the token encrypted; "" removes it.
+func (s *Store) SetGitHubToken(ctx context.Context, userID, token string) error {
+	var enc *string
+	if token != "" {
+		v, err := s.Encrypt(ctx, token)
+		if err != nil {
+			return err
+		}
+		enc = &v
+	}
+	tag, err := s.db.Exec(ctx, `UPDATE settings SET github_token_enc = $2, github_token = NULL WHERE user_id = $1`, userID, enc)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SearchBoards — board-name match for the global search.

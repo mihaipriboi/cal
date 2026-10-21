@@ -28,7 +28,7 @@ export function GitHubPage() {
 
   const load = () => {
     void api.boards().then(setBoards).catch(reportErr("Could not load boards"));
-    if (!settings.githubToken) { setErr(true); return; }
+    if (!settings.githubConnected) { setErr(true); return; }
     setLoading(true);
     void api.githubInbox()
       .then((x) => { setItems(x); setErr(false); })

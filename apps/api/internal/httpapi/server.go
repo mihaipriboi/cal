@@ -452,7 +452,11 @@ func (s *Server) updateEntry(c *gin.Context) {
 	if entry.BoardID != nil {
 		if patch.Completed != nil && *patch.Completed && entry.LinkURL != "" && strings.Contains(entry.LinkURL, "github.com") {
 			go func() {
-				if token, err := s.store.GitHubToken(context.Background(), currentUser(c).ID); err == nil && token != "" {
+				userID := currentUser(c).ID
+				if st, err := s.store.Settings(context.Background(), userID); err != nil || !st.GithubCloseIssues {
+					return
+				}
+				if token, err := s.store.GitHubToken(context.Background(), userID); err == nil && token != "" {
 					ghCloseIssue(context.Background(), token, entry.LinkURL)
 				}
 			}()

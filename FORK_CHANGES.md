@@ -43,6 +43,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-024](#fc-024--logout-clears-cached-personal-data) | web | Logout drops the entries snapshot and API cache; tokens never cached in localStorage | yes |
 | [FC-025](#fc-025--all-workflow-actions-pinned-by-commit) | CI | Every GitHub Action is pinned to a commit SHA | yes |
 | [FC-026](#fc-026--credential-key-outside-the-database-github-token-encrypted-and-write-only) | security | Encryption key moves to `DATA_DIR/secret.key`; GitHub token encrypted, write-only; tokens left out of exports/backups | yes |
+| [FC-027](#fc-027--closing-linked-github-issues-is-opt-in) | API | Completing a card closes its GitHub issue only if `githubCloseIssues` is on | yes |
 
 ## Details
 
@@ -373,3 +374,15 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - The same database with a different provided key: values are re-encrypted.
   - A restart with the same key works, while a different or missing key file returns `ErrSecretKeyMismatch` and creates no new file.
   - `TestGitHubTokenWriteOnly`: set, the `githubConnected` flag, a full settings save with `githubToken` that doesn't change it, no token in `/api/settings` or `/api/export`, no API or widget token in the export, invalid token → 400, and remove.
+
+### FC-027 — Closing linked GitHub issues is opt-in
+
+- **Why:** completing a board card linked to a GitHub issue always closed that issue on GitHub with the user's token. It's a write to an external service that users may not expect, made whenever a GitHub token was set for reading the inbox.
+- **What changed:**
+  - Migration `10003` adds `settings.github_close_issues BOOLEAN NOT NULL DEFAULT false`, exposed as `githubCloseIssues`.
+  - `updateEntry` closes the linked issue only when it's on.
+  - The web Settings → Integrations section gets the switch "Close the GitHub issue when its card is completed".
+  - `ghAPI` is a variable so tests can point it at a stub.
+- **Compatibility:** behaviour change. Existing users who relied on auto-close must turn it on. Reading GitHub (inbox, card sync from GitHub to Cal) is unchanged.
+- **Upstreamable:** yes.
+- **Tests:** `TestGitHubCloseIssueIsOptIn`, against a stub GitHub API: completing a linked card sends no PATCH with the setting off and exactly one with it on.

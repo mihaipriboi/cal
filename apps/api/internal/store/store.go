@@ -95,9 +95,12 @@ type Settings struct {
 	DefaultRate  *float64 `json:"defaultRate,omitempty"`
 	// GithubConnected reports whether a GitHub token is stored. The token is
 	// write-only: set via SetGitHubToken, read server-side via GitHubToken.
-	GithubConnected bool   `json:"githubConnected"`
-	WidgetToken     string `json:"widgetToken"`
-	ApiToken        string `json:"apiToken"`
+	GithubConnected bool `json:"githubConnected"`
+	// GithubCloseIssues closes a card's linked GitHub issue when the card is
+	// completed (a write to GitHub). Off unless chosen.
+	GithubCloseIssues bool   `json:"githubCloseIssues"`
+	WidgetToken       string `json:"widgetToken"`
+	ApiToken          string `json:"apiToken"`
 	// Modules gates feature areas; absent key = enabled.
 	Modules         map[string]bool `json:"modules,omitempty"`
 	ActiveWorkspace *string         `json:"activeWorkspace,omitempty"`
@@ -799,16 +802,16 @@ func (s *Store) Settings(ctx context.Context, userID string) (Settings, error) {
 		SELECT country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
 		       coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
 		       modules, active_workspace::text, default_view, nameday_country, invidious_url,
-		       coalesce(people_share_token, '') FROM settings WHERE user_id = $1
-	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken)
+		       coalesce(people_share_token, ''), github_close_issues FROM settings WHERE user_id = $1
+	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken, &settings.GithubCloseIssues)
 	return settings, err
 }
 
 func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Settings) (Settings, error) {
 	var out Settings
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, modules, active_workspace, default_view, nameday_country, invidious_url)
-		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, coalesce($11::jsonb, '{}'::jsonb), $12::uuid, coalesce(nullif($13, ''), 'month'), $14, $15)
+		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, modules, active_workspace, default_view, nameday_country, invidious_url, github_close_issues)
+		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, coalesce($11::jsonb, '{}'::jsonb), $12::uuid, coalesce(nullif($13, ''), 'month'), $14, $15, $16)
 		ON CONFLICT (user_id) DO UPDATE
 		SET country = EXCLUDED.country,
 		    show_holidays = EXCLUDED.show_holidays,
@@ -823,12 +826,13 @@ func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Sett
 		    active_workspace = EXCLUDED.active_workspace,
 		    default_view = coalesce(EXCLUDED.default_view, 'month'),
 		    nameday_country = EXCLUDED.nameday_country,
-		    invidious_url = EXCLUDED.invidious_url
+		    invidious_url = EXCLUDED.invidious_url,
+		    github_close_issues = EXCLUDED.github_close_issues
 		RETURNING country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
 		          coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
-		          modules, active_workspace::text, default_view, nameday_country, invidious_url
-	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL).
-		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL)
+		          modules, active_workspace::text, default_view, nameday_country, invidious_url, github_close_issues
+	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL, settings.GithubCloseIssues).
+		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL, &out.GithubCloseIssues)
 	return out, err
 }
 

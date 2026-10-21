@@ -464,6 +464,17 @@ export function SettingsPage() {
                 )}
               </div>
             </div>
+            <label className="switch-row">
+              Close the GitHub issue when its card is completed
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  checked={settings.githubCloseIssues ?? false}
+                  onChange={(e) => set({ githubCloseIssues: e.target.checked })}
+                />
+                <i />
+              </span>
+            </label>
             <label className="field">
               <span>Invidious instance</span>
               <input

@@ -156,6 +156,8 @@ export interface Settings {
   defaultRate?: number;
   /** A GitHub token is stored; the token itself is write-only. */
   githubConnected?: boolean;
+  /** Completing a card closes its linked GitHub issue (off by default). */
+  githubCloseIssues?: boolean;
   widgetToken: string;
   apiToken: string;
   /** Feature modules on/off; absent key = enabled. */

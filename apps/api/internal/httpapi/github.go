@@ -19,7 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const ghAPI = "https://api.github.com"
+// ghAPI is a var so tests can point it at a stub.
+var ghAPI = "https://api.github.com"
 
 func ghClient() *http.Client { return &http.Client{Timeout: 10 * time.Second} }
 

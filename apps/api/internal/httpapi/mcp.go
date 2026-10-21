@@ -879,6 +879,10 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 			fail("unknown board")
 			return
 		}
+		if args.ColumnID != "" && !s.store.ColumnInBoard(ctx, user.ID, args.BoardID, args.ColumnID) {
+			fail("column not on this board")
+			return
+		}
 		if args.Date == "" {
 			args.Date = time.Now().Format("2006-01-02")
 		}
@@ -914,6 +918,10 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 		entry, err := s.store.Entry(ctx, user.ID, args.ID)
 		if err != nil || entry.BoardID == nil {
 			fail("card not found")
+			return
+		}
+		if !s.store.ColumnInBoard(ctx, user.ID, *entry.BoardID, args.ColumnID) {
+			fail("column not on this board")
 			return
 		}
 		if err := s.store.MoveCard(ctx, user.ID, args.ID, *entry.BoardID, &args.ColumnID, args.Position); err != nil {

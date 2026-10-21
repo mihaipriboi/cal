@@ -34,6 +34,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-015](#fc-015--address-check-at-connect-time-for-user-supplied-urls) | API | Link previews, feeds and webhooks check the address actually dialed, on every redirect | yes |
 | [FC-016](#fc-016--deploy-compose-follows-latest) | deploy | `deploy/compose.yml` follows `latest`; updating is `docker compose pull && docker compose up -d` | no |
 | [FC-017](#fc-017--image-build-fetches-and-runs-less) | build | No embedded-Postgres download and no npm install scripts during the image build | yes |
+| [FC-018](#fc-018--mcp-card-tools-check-the-columns-board) | API | MCP `create_card`/`move_card` only accept a column of the card's board | yes |
 
 ## Details
 
@@ -248,3 +249,11 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - A container started *without* `DATABASE_URL` now downloads the embedded Postgres on first boot (needs network), unless built with the argument.
 - **Upstreamable:** yes.
 - **Tests:** `docker build` of the image, with the build log checked for no Maven traffic, and a smoke run against an external Postgres.
+
+### FC-018 — MCP card tools check the column's board
+
+- **Why:** the MCP `create_card` and `move_card` tools accepted any `columnId`, unlike the REST handlers (`createEntry`, `moveCard`) and the shared-board move. An agent could place a card on one board in a column of another.
+- **What changed:** `httpapi/mcp.go`. Both tools call `ColumnInBoard` and return a tool error ("column not on this board") otherwise. `create_card` checks only when a column is given.
+- **Compatibility:** no change for valid calls.
+- **Upstreamable:** yes.
+- **Tests:** `TestMCPCardColumnMustBelongToBoard` (`mcp_cards_test.go`): cross-board create and move are refused, same-board ones work.

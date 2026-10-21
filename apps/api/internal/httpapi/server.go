@@ -317,9 +317,15 @@ func (s *Server) login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": user, "session": session})
 }
 
+// logout ends the caller's session on the server, whether it came as the
+// web cookie or as the native apps' Bearer token.
 func (s *Server) logout(c *gin.Context) {
-	if cookie, err := c.Cookie("cal_session"); err == nil {
-		_ = s.store.DeleteSession(c.Request.Context(), cookie)
+	token, err := c.Cookie("cal_session")
+	if err != nil || token == "" {
+		token = bearerOrQuery(c)
+	}
+	if token != "" {
+		_ = s.store.DeleteSession(c.Request.Context(), token)
 	}
 	s.writeSessionCookie(c, "", -1)
 	c.Status(http.StatusNoContent)

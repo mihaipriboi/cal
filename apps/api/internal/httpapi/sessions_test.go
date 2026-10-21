@@ -87,3 +87,14 @@ func TestSessionHashMigrationKeepsLogins(t *testing.T) {
 		t.Fatalf("pre-upgrade token no longer signs in: %v", err)
 	}
 }
+
+// Logging out with the Bearer token (native apps) ends that session too.
+func TestBearerLogoutEndsSession(t *testing.T) {
+	srv, session := newTestServer(t)
+	if code, _ := doJSONStatus(t, srv, http.MethodPost, "/api/auth/logout", "", session); code != http.StatusNoContent {
+		t.Fatalf("logout: %d", code)
+	}
+	if code, _ := doJSONStatus(t, srv, http.MethodGet, "/api/me", "", session); code != http.StatusUnauthorized {
+		t.Fatalf("session still valid after Bearer logout: %d", code)
+	}
+}

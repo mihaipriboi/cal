@@ -46,6 +46,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-027](#fc-027--closing-linked-github-issues-is-opt-in) | API | Completing a card closes its GitHub issue only if `githubCloseIssues` is on | yes |
 | [FC-028](#fc-028--one-token-per-capability) | auth | Separate tokens for MCP, email intake, ICS feed and widget | yes |
 | [FC-029](#fc-029--sessions-stored-as-hashes) | auth | Session tokens stored as SHA-256; session list shows hashes, not tokens | yes |
+| [FC-030](#fc-030--logout-ends-bearer-sessions-too) | auth | Native (Bearer) logout now invalidates the session server-side | yes |
 
 ## Details
 
@@ -426,3 +427,11 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Tests:**
   - `TestSessionsListedByHash`: the list doesn't contain the token, the current entry's ID is SHA-256(token), and revoking by that ID ends the session.
   - `TestSessionHashMigrationKeepsLogins`: on a database at `10004` with an old-style session row, migrating stores the hash and the pre-upgrade token still signs in.
+
+### FC-030 — Logout ends Bearer sessions too
+
+- **Why:** `POST /api/auth/logout` deleted the server-side session only when it arrived as the `cal_session` cookie. The native apps authenticate with a Bearer token, so their logout only cleared local state and the token stayed valid for up to 30 days.
+- **What changed:** `httpapi/server.go` `logout` ends the session presented either as the cookie or as `Authorization: Bearer`.
+- **Compatibility:** none for the web app. Native logouts now also end the session on the server.
+- **Upstreamable:** yes.
+- **Tests:** `TestBearerLogoutEndsSession`: after a Bearer logout, the token gets 401. Before the fix it still got 200.

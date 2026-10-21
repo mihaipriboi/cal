@@ -1,6 +1,7 @@
 import type { Accent, AdminConfig, CarddavAccount, Country, NagerHoliday, RestorePreview, SessionInfo, User, Webhook } from "@cal/api-client";
 import { Bell, BellOff, Copy, Download, FileText, LogOut, Plus, RefreshCw, Trash2, Upload, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FeedMenu, type FeedMenuAnchor } from "../components/FeedMenu";
 import { PageHeader } from "../components/PageHeader";
 import { MODULES, moduleOn } from "../lib/modules";
 import { disablePush, enablePush, pushEnabled } from "../lib/push";
@@ -53,6 +54,7 @@ export function SettingsPage() {
   const [feedName, setFeedName] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
   const [feedKind, setFeedKind] = useState<"calendar" | "links">("calendar");
+  const [feedMenu, setFeedMenu] = useState<FeedMenuAnchor>();
   const [adding, setAdding] = useState(false);
   const [pushOn, setPushOn] = useState<boolean>();
   const [davName, setDavName] = useState("");
@@ -556,12 +558,22 @@ export function SettingsPage() {
           <h3>Feeds</h3>
           <p className="panel-note">
             Subscribe to iCalendar (.ics) or RSS/Atom URLs — Google Calendar's secret address,
-            iCloud public calendars, blog feeds. "To links" feeds (e.g. a YouTube channel's
+            iCloud public calendars, blog feeds. "To links" feeds (e.g. a YouTube channel's{" "}
             <code>feeds/videos.xml</code>) save new items as link cards with thumbnails instead.
+            Click a feed's colour to rename or recolour it.
           </p>
           {feeds.map((feed) => (
             <div key={feed.id} className="feed-row">
-              <span className="swatch" style={{ "--swatch": `var(--c-${feed.color})` } as React.CSSProperties} />
+              <button
+                type="button"
+                className="swatch-btn"
+                style={{ "--swatch": `var(--c-${feed.color})` } as React.CSSProperties}
+                aria-label={`Rename or recolour ${feed.name}`}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setFeedMenu({ feed, x: r.left, y: r.bottom + 6 });
+                }}
+              />
               <div className="feed-meta">
                 <span className="feed-name">{feed.name}{feed.kind === "links" && <span className="feed-kind">→ links</span>}</span>
                 <span className="feed-url">{feed.url}</span>
@@ -577,6 +589,7 @@ export function SettingsPage() {
               </button>
             </div>
           ))}
+          {feedMenu && <FeedMenu {...feedMenu} onClose={() => setFeedMenu(undefined)} />}
           <div className="feed-add">
             <input className="input" placeholder="Name (e.g. Work)" value={feedName} onChange={(e) => setFeedName(e.target.value)} />
             <input

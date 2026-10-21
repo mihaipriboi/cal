@@ -1,5 +1,6 @@
-import { CalendarDays, ChevronLeft, ChevronRight, FolderOpen, GitPullRequest as GithubIcon, Hash, Link2, ListChecks, Mail, Plus, Search, Settings2, ShoppingCart, StickyNote, Sun, Timer as TimerIcon, Trash2, Kanban, Users } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, FolderOpen, GitPullRequest as GithubIcon, Hash, Link2, ListChecks, Mail, MoreHorizontal, Plus, Search, Settings2, ShoppingCart, StickyNote, Sun, Timer as TimerIcon, Trash2, Kanban, Users } from "lucide-react";
 import { TimerPill } from "./TimerPill";
+import { FeedMenu, type FeedMenuAnchor } from "./FeedMenu";
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { addMonths, fromIso, iso, monthMatrix, todayIso, weekdayNames, type WeekStartPref } from "../lib/date";
@@ -144,6 +145,7 @@ export function Sidebar() {
   const hiddenFeeds = useUi((state) => state.hiddenFeeds);
   const toggleType = useUi((state) => state.toggleType);
   const toggleFeed = useUi((state) => state.toggleFeed);
+  const [feedMenu, setFeedMenu] = useState<FeedMenuAnchor>();
   const sidebarOpen = useUi((state) => state.sidebarOpen);
   const closeSidebar = useUi((state) => state.closeSidebar);
 
@@ -238,18 +240,38 @@ export function Sidebar() {
             <div className="side-label">Calendars</div>
             <div className="filter-list">
               {feeds.map((feed) => (
-                <button
+                <div
                   key={feed.id}
-                  type="button"
-                  className={`filter-item ${hiddenFeeds.has(feed.id) ? "off" : ""}`}
-                  onClick={() => toggleFeed(feed.id)}
-                  title={feed.url}
+                  className="feed-filter"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setFeedMenu({ feed, x: e.clientX, y: e.clientY });
+                  }}
                 >
-                  <span className="swatch" style={{ "--swatch": `var(--c-${feed.color})` } as React.CSSProperties} />
-                  {feed.name}
-                </button>
+                  <button
+                    type="button"
+                    className={`filter-item ${hiddenFeeds.has(feed.id) ? "off" : ""}`}
+                    onClick={() => toggleFeed(feed.id)}
+                    title={feed.url}
+                  >
+                    <span className="swatch" style={{ "--swatch": `var(--c-${feed.color})` } as React.CSSProperties} />
+                    {feed.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn feed-more"
+                    aria-label={`Rename or recolour ${feed.name}`}
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setFeedMenu({ feed, x: r.left, y: r.bottom + 4 });
+                    }}
+                  >
+                    <MoreHorizontal size={14} />
+                  </button>
+                </div>
               ))}
             </div>
+            {feedMenu && <FeedMenu {...feedMenu} onClose={() => setFeedMenu(undefined)} />}
           </>
         )}
 

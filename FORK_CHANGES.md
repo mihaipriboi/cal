@@ -47,6 +47,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-028](#fc-028--one-token-per-capability) | auth | Separate tokens for MCP, email intake, ICS feed and widget | yes |
 | [FC-029](#fc-029--sessions-stored-as-hashes) | auth | Session tokens stored as SHA-256; session list shows hashes, not tokens | yes |
 | [FC-030](#fc-030--logout-ends-bearer-sessions-too) | auth | Native (Bearer) logout now invalidates the session server-side | yes |
+| [FC-031](#fc-031--rename-and-recolour-subscribed-calendars) | feeds | `PATCH /api/feeds/:id` (name, colour); distinct default colours; ⋯ menu in the sidebar | yes |
 
 ## Details
 
@@ -435,3 +436,26 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** none for the web app. Native logouts now also end the session on the server.
 - **Upstreamable:** yes.
 - **Tests:** `TestBearerLogoutEndsSession`: after a Bearer logout, the token gets 401. Before the fix it still got 200.
+
+### FC-031 — Rename and recolour subscribed calendars
+
+- **Why:** subscribed calendars (feeds) got a colour only when created, and the web app never sent one, so every feed was `sky` and they couldn't be told apart. There was no way to rename or recolour a feed afterwards.
+- **What changed:**
+  - **API.**
+    - New `PATCH /api/feeds/:id` with `{name?, color?}` (`store.UpdateFeed`). The name is trimmed and 1–80 characters. The colour must be one of the palette tokens. Any other field, including `url`, is rejected with 400, so a feed's source can only change by deleting and re-adding it, which keeps every URL on `createFeed`'s checks. Another user's feed gives 404.
+    - A feed's events take its colour when they're read, so recolouring applies to every past and future event of that feed.
+    - `POST /api/feeds` validates a given colour. Without one, it picks the first palette colour no other feed of the user has (`nextFeedColor`), instead of always `sky`.
+    - The palette list (`paletteColors`, `httpapi/colors.go`) is now one list, shared with the MCP `create_entry` schema.
+  - **Web.**
+    - New `FeedMenu` popover with a name field and colour dots. A colour applies on click, and the name saves on Enter or when the popover closes. Escape discards a typed name.
+    - It opens from a ⋯ button on each sidebar "Calendars" row (shown on hover, always shown on touch screens), from right-clicking the row, or from the feed's colour square in Settings → Feeds, which wasn't styled and so was invisible before.
+    - Updates are optimistic (`applyFeedPatch` in `lib/feeds.ts`), so the sidebar and the calendar's feed events change at once, and they're rolled back if the server refuses.
+    - The popover is portalled to `<body>`, because the transformed mobile sidebar drawer would otherwise anchor `position: fixed`.
+  - **Docs.** `openapi.yaml` documents the PATCH and the colour enum. There's also a missing space fixed in the Settings feeds note.
+- **Compatibility:** additive API. Existing feeds keep their colour. An unknown colour on create is now a 400 (it used to be stored and rendered unstyled).
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestFeedRenameAndRecolour`: two new feeds get different colours, an unknown colour on create gives 400, and a PATCH trims the name and sets the colour, which the feed's events then carry. An empty name, unknown colour or `url` field gives 400, and an unknown or foreign feed gives 404.
+  - `TestNextFeedColor`: no repeats until the palette is used up.
+  - `lib/feeds.test.ts`: the optimistic patch only touches the right feed and its events.
+  - Checked by hand in headless Chromium at desktop and phone sizes: ⋯ on hover and touch, recolour visible on the event immediately, rename on Enter, Escape discards, the Settings square opens the menu, and the menu stays inside a 390 px screen.

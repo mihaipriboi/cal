@@ -102,6 +102,7 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 	authed.GET("/export", server.export)
 	authed.GET("/feeds", server.listFeeds)
 	authed.POST("/feeds", newRateLimiter(10, time.Minute), server.createFeed)
+	authed.PATCH("/feeds/:id", server.updateFeed)
 	authed.DELETE("/feeds/:id", server.deleteFeed)
 	authed.POST("/feeds/:id/refresh", server.refreshFeed)
 	authed.GET("/feed-events", server.feedEvents)

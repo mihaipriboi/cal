@@ -615,6 +615,8 @@ paths:
                   format: uri
                 color:
                   type: string
+                  enum: [slate, mint, sky, violet, amber, orange, rose, red]
+                  description: Omitted = the first colour no other feed uses
       responses:
         "201":
           description: Subscribed feed
@@ -627,6 +629,34 @@ paths:
         "502":
           description: Feed URL could not be fetched
   /feeds/{id}:
+    patch:
+      summary: Rename and/or recolour a feed. Only name and color are accepted; the URL can't be changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                color:
+                  type: string
+                  enum: [slate, mint, sky, violet, amber, orange, rose, red]
+      responses:
+        "200":
+          description: Updated feed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feed"
+        "400":
+          description: Empty/long name, unknown colour, or a field other than name/color
+        "404":
+          description: Not the caller's feed
     delete:
       responses:
         "204":

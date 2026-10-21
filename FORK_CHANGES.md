@@ -36,6 +36,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-017](#fc-017--image-build-fetches-and-runs-less) | build | No embedded-Postgres download and no npm install scripts during the image build | yes |
 | [FC-018](#fc-018--mcp-card-tools-check-the-columns-board) | API | MCP `create_card`/`move_card` only accept a column of the card's board | yes |
 | [FC-019](#fc-019--github-sync-loop-reuses-one-ticker) | API | GitHub sync uses one ticker instead of one per iteration | yes |
+| [FC-020](#fc-020--push-subscriptions-scoped-to-their-owner) | API | Push subscribe/unsubscribe can't take over or delete another user's endpoint | yes |
 
 ## Details
 
@@ -266,3 +267,14 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** none.
 - **Upstreamable:** yes.
 - **Tests:** none specific. `go vet` and the existing suite pass.
+
+### FC-020 — Push subscriptions scoped to their owner
+
+- **Why:** subscribing reassigned an existing push endpoint to whoever posted it (`ON CONFLICT (endpoint) DO UPDATE SET user_id = …`), and `POST /api/push/unsubscribe` deleted an endpoint regardless of owner. With several accounts, a user who learned another's endpoint could silence that device or delete its subscription.
+- **What changed:**
+  - `store.UpsertPushSub` updates an existing endpoint only if it belongs to the same user, **or** the posted `p256dh`/`auth` keys equal the stored ones. That is the same browser subscription switching accounts, which keeps working as before.
+  - Unsubscribe uses the new `DeleteUserPushSub(user, endpoint)`.
+  - `DeletePushSub(endpoint)` stays for the reminder loop, which prunes endpoints the push service reports gone.
+- **Compatibility:** unchanged for single-user setups and for account switching in one browser. A foreign subscribe or unsubscribe of someone else's endpoint is now a silent no-op (still 204).
+- **Upstreamable:** yes.
+- **Tests:** `TestPushSubscriptionOwnership`: a foreign subscribe with different keys and a foreign unsubscribe leave the owner's row alone, the same keys move it, and the owner can unsubscribe.

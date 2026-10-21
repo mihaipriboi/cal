@@ -888,11 +888,16 @@ type PushSubscription struct {
 	Label    string `json:"label"`
 }
 
+// UpsertPushSub saves a browser's push subscription. An endpoint already held
+// by another user moves only when the keys match too: the same browser
+// switching accounts. Knowing an endpoint alone can't take it over.
 func (s *Store) UpsertPushSub(ctx context.Context, userID, endpoint, p256dh, auth, label string) error {
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, label)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, user_id = EXCLUDED.user_id, label = EXCLUDED.label
+		WHERE push_subscriptions.user_id = EXCLUDED.user_id
+		   OR (push_subscriptions.p256dh = EXCLUDED.p256dh AND push_subscriptions.auth = EXCLUDED.auth)
 	`, uuid.NewString(), userID, endpoint, p256dh, auth, label)
 	return err
 }
@@ -903,6 +908,13 @@ func (s *Store) DeletePushSubByID(ctx context.Context, userID, id string) error 
 	return err
 }
 
+// DeleteUserPushSub removes the user's own subscription for endpoint.
+func (s *Store) DeleteUserPushSub(ctx context.Context, userID, endpoint string) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2`, endpoint, userID)
+	return err
+}
+
+// DeletePushSub drops an endpoint the push service reported gone (any owner).
 func (s *Store) DeletePushSub(ctx context.Context, endpoint string) error {
 	_, err := s.db.Exec(ctx, `DELETE FROM push_subscriptions WHERE endpoint = $1`, endpoint)
 	return err

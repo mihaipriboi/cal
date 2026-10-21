@@ -68,7 +68,7 @@ var mcpTools = []gin.H{
 				"date":      gin.H{"type": "string", "description": "YYYY-MM-DD"},
 				"startTime": gin.H{"type": "string", "description": "HH:MM"},
 				"endTime":   gin.H{"type": "string", "description": "HH:MM"},
-				"color":     gin.H{"type": "string", "enum": []string{"slate", "mint", "sky", "violet", "amber", "orange", "rose", "red"}},
+				"color":     gin.H{"type": "string", "enum": paletteColors},
 				"tags":      gin.H{"type": "array", "items": gin.H{"type": "string"}},
 				"content":   gin.H{"type": "string"},
 				"linkUrl":   gin.H{"type": "string"},

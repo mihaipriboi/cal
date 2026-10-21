@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"cal/apps/api/internal/ical"
 	"cal/apps/api/internal/rss"
@@ -112,13 +113,17 @@ func (s *Server) createFeed(c *gin.Context) {
 		c.String(http.StatusBadRequest, "not a valid iCalendar feed")
 		return
 	}
+	userID := currentUser(c).ID
 	if body.Color == "" {
-		body.Color = "sky"
+		existing, _ := s.store.ListFeeds(c.Request.Context(), userID)
+		body.Color = nextFeedColor(existing)
+	} else if !validColor(body.Color) {
+		c.String(http.StatusBadRequest, "unknown color")
+		return
 	}
 	if body.Kind != "links" {
 		body.Kind = "calendar"
 	}
-	userID := currentUser(c).ID
 	feed, err := s.store.CreateFeed(c.Request.Context(), userID, body.Name, body.URL, body.Color, body.Kind, ics)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed to save feed")
@@ -128,6 +133,42 @@ func (s *Server) createFeed(c *gin.Context) {
 		go syncLinkFeed(context.Background(), s.store, userID, feed.ID, ics)
 	}
 	c.JSON(http.StatusCreated, feed)
+}
+
+// updateFeed renames and/or recolours a feed. Only name and color are
+// accepted; the URL can't change (delete and re-add, so every source goes
+// through createFeed's checks).
+func (s *Server) updateFeed(c *gin.Context) {
+	var body struct {
+		Name  *string `json:"name"`
+		Color *string `json:"color"`
+	}
+	if !bind(c, &body) {
+		c.String(http.StatusBadRequest, "only name and color can be changed")
+		return
+	}
+	if body.Name != nil {
+		name := strings.TrimSpace(*body.Name)
+		if name == "" || utf8.RuneCountInString(name) > 80 {
+			c.String(http.StatusBadRequest, "name must be 1-80 characters")
+			return
+		}
+		body.Name = &name
+	}
+	if body.Color != nil && !validColor(*body.Color) {
+		c.String(http.StatusBadRequest, "unknown color")
+		return
+	}
+	feed, err := s.store.UpdateFeed(c.Request.Context(), currentUser(c).ID, c.Param("id"), body.Name, body.Color)
+	if errors.Is(err, store.ErrNotFound) {
+		c.String(http.StatusNotFound, "feed not found")
+		return
+	}
+	if err != nil {
+		c.String(http.StatusInternalServerError, "failed to update feed")
+		return
+	}
+	c.JSON(http.StatusOK, feed)
 }
 
 func (s *Server) deleteFeed(c *gin.Context) {

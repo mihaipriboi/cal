@@ -1351,6 +1351,21 @@ func (s *Store) CreateFeed(ctx context.Context, userID, name, url, color, kind, 
 	return f, err
 }
 
+// UpdateFeed renames and/or recolours a feed (nil = unchanged). The URL is
+// never changed here: a different source is a new feed.
+func (s *Store) UpdateFeed(ctx context.Context, userID, id string, name, color *string) (Feed, error) {
+	var f Feed
+	err := s.db.QueryRow(ctx, `
+		UPDATE feeds SET name = coalesce($3, name), color = coalesce($4, color)
+		WHERE id = $1 AND user_id = $2
+		RETURNING id::text, name, url, color, kind, fetched_at
+	`, id, userID, name, color).Scan(&f.ID, &f.Name, &f.URL, &f.Color, &f.Kind, &f.FetchedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Feed{}, ErrNotFound
+	}
+	return f, err
+}
+
 func (s *Store) DeleteFeed(ctx context.Context, userID, id string) error {
 	tag, err := s.db.Exec(ctx, `DELETE FROM feeds WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {

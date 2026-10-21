@@ -662,6 +662,11 @@ export class CalApi {
     return this.request<Feed>("/feeds", { method: "POST", body: input });
   }
 
+  /** Renames and/or recolours a feed; its URL can't be changed. */
+  async updateFeed(id: string, patch: { name?: string; color?: string }): Promise<Feed> {
+    return this.request<Feed>(`/feeds/${id}`, { method: "PATCH", body: patch });
+  }
+
   async deleteFeed(id: string): Promise<void> {
     await this.request<void>(`/feeds/${id}`, { method: "DELETE" });
   }

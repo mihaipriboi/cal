@@ -28,6 +28,7 @@ import { ApiError } from "@cal/api-client";
 import { enqueue, isOfflineError, newTempId, readQueue, writeQueue } from "../lib/opqueue";
 import { clearImport, isLocalMode, markLocalMode, wantsImport } from "../lib/local";
 import { nativeMail } from "../lib/mail";
+import { applyFeedPatch, type FeedPatch } from "../lib/feeds";
 import { useUi } from "./ui";
 
 // Synthetic identity for local mode — there is no account, just this device.
@@ -97,6 +98,7 @@ interface PlannerState {
   syncAccount: (id: string) => Promise<void>;
   loadFeedEvents: (params: { from: string; to: string }) => Promise<void>;
   addFeed: (input: { name: string; url: string; color?: string; kind?: string }) => Promise<boolean>;
+  updateFeed: (id: string, patch: FeedPatch) => Promise<void>;
   removeFeed: (id: string) => Promise<void>;
   refreshFeed: (id: string) => Promise<void>;
   loadPeople: () => Promise<void>;
@@ -505,6 +507,18 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     } catch (error) {
       get().toast(error instanceof Error ? error.message : "Failed to add feed");
       return false;
+    }
+  },
+
+  async updateFeed(id, patch) {
+    const before = { feeds: get().feeds, feedEvents: get().feedEvents };
+    set(applyFeedPatch(before.feeds, before.feedEvents, id, patch));
+    try {
+      const saved = await get().api.updateFeed(id, patch);
+      set({ feeds: get().feeds.map((f) => (f.id === id ? saved : f)) });
+    } catch (error) {
+      set(before);
+      get().toast(error instanceof Error ? error.message : "Failed to update feed");
     }
   },
 

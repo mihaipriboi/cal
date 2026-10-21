@@ -30,6 +30,13 @@ const (
 	maxRestoreBytes = 512 << 20
 )
 
+// exportSettings drops access tokens from settings bound for an export file
+// or a backup: they grant access, and restore never reads settings back.
+func exportSettings(st store.Settings) store.Settings {
+	st.WidgetToken, st.ApiToken, st.PeopleShareToken = "", "", ""
+	return st
+}
+
 // exportPayload is the restore-side view of the /api/export manifest.
 type exportPayload struct {
 	Entries          []store.Entry           `json:"entries"`

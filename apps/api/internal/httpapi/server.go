@@ -108,6 +108,8 @@ func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
 	authed.POST("/import", server.importICS)
 	authed.POST("/settings/widget-token", server.rotateWidgetToken)
 	authed.POST("/settings/api-token", server.rotateApiToken)
+	authed.PUT("/settings/github-token", server.setGitHubToken)
+	authed.DELETE("/settings/github-token", server.setGitHubToken)
 	authed.POST("/restore", server.restoreJSON)
 	authed.GET("/sessions", server.listSessions)
 	authed.DELETE("/sessions/:id", server.revokeSession)
@@ -450,8 +452,8 @@ func (s *Server) updateEntry(c *gin.Context) {
 	if entry.BoardID != nil {
 		if patch.Completed != nil && *patch.Completed && entry.LinkURL != "" && strings.Contains(entry.LinkURL, "github.com") {
 			go func() {
-				if st, err := s.store.Settings(context.Background(), currentUser(c).ID); err == nil && st.GithubToken != "" {
-					ghCloseIssue(context.Background(), st.GithubToken, entry.LinkURL)
+				if token, err := s.store.GitHubToken(context.Background(), currentUser(c).ID); err == nil && token != "" {
+					ghCloseIssue(context.Background(), token, entry.LinkURL)
 				}
 			}()
 		}
@@ -526,12 +528,17 @@ func (s *Server) settings(c *gin.Context) {
 }
 
 func (s *Server) updateSettings(c *gin.Context) {
-	var input store.Settings
-	if !bind(c, &input) || !validSettings(input) {
+	var input struct {
+		store.Settings
+		// Ignored: the token has its own write-only endpoint, but older
+		// clients still send it with every settings save.
+		GithubToken *string `json:"githubToken"`
+	}
+	if !bind(c, &input) || !validSettings(input.Settings) {
 		c.String(http.StatusBadRequest, "invalid settings")
 		return
 	}
-	settings, err := s.store.UpdateSettings(c.Request.Context(), currentUser(c).ID, input)
+	settings, err := s.store.UpdateSettings(c.Request.Context(), currentUser(c).ID, input.Settings)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed to update settings")
 		return
@@ -561,7 +568,7 @@ func (s *Server) export(c *gin.Context) {
 	payload := gin.H{
 		"exportedAt":       time.Now().UTC().Format(time.RFC3339),
 		"user":             user,
-		"settings":         settings,
+		"settings":         exportSettings(settings),
 		"entries":          entries,
 		"people":           people,
 		"personLinks":      links,

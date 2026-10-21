@@ -106,6 +106,7 @@ interface PlannerState {
   importIcs: (file: File) => Promise<void>;
   restore: (file: File) => Promise<void>;
   rotateToken: (kind: "widget" | "api") => Promise<void>;
+  setGitHubToken: (token: string) => Promise<boolean>;
   updateSettings: (settings: Settings) => Promise<void>;
   toast: (message: string, action?: Toast["action"]) => void;
   dismissToast: (id: number) => void;
@@ -633,6 +634,20 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       get().toast(`Imported ${out.imported} event${out.imported === 1 ? "" : "s"}`);
     } catch (error) {
       get().toast(error instanceof Error ? error.message : "Import failed");
+    }
+  },
+
+  async setGitHubToken(token) {
+    try {
+      const connected = await get().api.setGitHubToken(token);
+      const settings = { ...get().settings, githubConnected: connected };
+      cacheSettings(settings);
+      set({ settings });
+      get().toast(connected ? "GitHub token saved" : "GitHub token removed");
+      return true;
+    } catch (error) {
+      get().toast(error instanceof Error ? error.message : "Failed to save GitHub token");
+      return false;
     }
   },
 

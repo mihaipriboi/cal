@@ -154,7 +154,8 @@ export interface Settings {
   quotaMb?: number;
   digestTime?: string;
   defaultRate?: number;
-  githubToken?: string;
+  /** A GitHub token is stored; the token itself is write-only. */
+  githubConnected?: boolean;
   widgetToken: string;
   apiToken: string;
   /** Feature modules on/off; absent key = enabled. */
@@ -1147,6 +1148,14 @@ export class CalApi {
   async rotateApiToken(): Promise<string> {
     const out = await this.request<{ apiToken: string }>("/settings/api-token", { method: "POST" });
     return out.apiToken;
+  }
+
+  /** Stores the GitHub token ("" removes it); returns whether one is set. */
+  async setGitHubToken(token: string): Promise<boolean> {
+    const out = token
+      ? await this.request<{ githubConnected: boolean }>("/settings/github-token", { method: "PUT", body: { token } })
+      : await this.request<{ githubConnected: boolean }>("/settings/github-token", { method: "DELETE" });
+    return out.githubConnected;
   }
 
   private headers(withJson: boolean): Record<string, string> {

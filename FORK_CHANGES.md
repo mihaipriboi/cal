@@ -42,6 +42,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-023](#fc-023--web-session-stays-in-the-httponly-cookie) | auth | Web client keeps no session token; `?session=` only authorizes GET/HEAD | yes |
 | [FC-024](#fc-024--logout-clears-cached-personal-data) | web | Logout drops the entries snapshot and API cache; tokens never cached in localStorage | yes |
 | [FC-025](#fc-025--all-workflow-actions-pinned-by-commit) | CI | Every GitHub Action is pinned to a commit SHA | yes |
+| [FC-026](#fc-026--credential-key-outside-the-database-github-token-encrypted-and-write-only) | security | Encryption key moves to `DATA_DIR/secret.key`; GitHub token encrypted, write-only; tokens left out of exports/backups | yes |
 
 ## Details
 
@@ -340,3 +341,35 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Upstreamable:** yes.
 - **Tests:** `actionlint` v1.7.7 passes on all workflows. Each SHA was resolved with the GitHub API (`commits/<tag>`) and matched to its `vX.Y.Z` tag.
 - **Not changed:** `release.yml` still fetches AppImage tooling from moving `continuous` builds. That workflow is manual-only in the fork (FC-009) and isn't used to publish anything.
+
+### FC-026 — Credential key outside the database; GitHub token encrypted and write-only
+
+- **Why:**
+  - The AES-256-GCM key for stored credentials (CalDAV, CardDAV and mail passwords, Google tokens) was kept in `server_config`, in the same database as the ciphertexts, so any database dump or backup decrypted them. It was also generated lazily, so two concurrent first uses could each create a key.
+  - The GitHub token was stored in plaintext, returned to the browser in every settings response, and included in `/api/export` and the nightly `DATA_DIR/backups/*.json`. Those also contained the API, widget and people-share tokens.
+- **What changed:**
+  - **Key file** (`store/crypto.go`, `app/app.go`). The key lives in `CAL_SECRET_KEY_FILE`, default `<DATA_DIR>/secret.key` (mode 0600, base64). `store.InitSecrets` runs once at startup, under an advisory lock:
+    - A missing file is created. If the database still has the legacy `crypto_key`, that key is adopted as is, with no re-encryption. Otherwise a new random key is generated.
+    - A provided key file that differs from the legacy key gets every encrypted column re-encrypted to it, in one transaction.
+    - The legacy key is then deleted from the database, and a key fingerprint (`secret_key_fingerprint`, a truncated SHA-256) is stored.
+    - With a missing or different key file once credentials exist, startup fails with a clear error instead of generating a key that can't decrypt them.
+    - `Encrypt`/`Decrypt` fail with `ErrNoSecretKey` until `InitSecrets` has run.
+  - **GitHub token.**
+    - Migration `10002` adds `settings.github_token_enc`. `InitSecrets` encrypts existing plaintext tokens into it and clears `github_token`.
+    - The token is write-only: `PUT /api/settings/github-token {token}` and `DELETE /api/settings/github-token`. Settings responses carry `githubConnected` instead of the token.
+    - `PUT /api/settings` no longer writes it, and accepts and ignores a `githubToken` field from older clients.
+    - Server-side readers use `store.GitHubToken`: GitHub inbox, MCP `github_inbox`, the sync loop and card auto-close.
+  - **Exports and backups.** `/api/export` and the nightly backup files blank the API, widget and people-share tokens (`exportSettings`). Restore never read settings back, so nothing is lost.
+  - **Web.** The Settings → Integrations GitHub field is a password input with Save and Remove buttons and shows "saved" when a token is stored. The GitHub page checks `githubConnected`.
+  - **Docs.** `CAL_SECRET_KEY_FILE` is in the README config table. The `deploy/compose.yml` header notes that `cal-data` now holds `secret.key`. `openapi.yaml` documents the new endpoint.
+- **Compatibility:**
+  - Existing installs migrate automatically on first start. The key moves to `<DATA_DIR>/secret.key`, so back up the data volume together with the database: a database restored without that file can't decrypt stored credentials.
+  - Rolling back to an older build after this migration needs the old key back in `server_config`.
+  - Migration `10002` Down drops the encrypted GitHub token, which then has to be entered again.
+  - API: settings carry `githubConnected` instead of `githubToken`.
+- **Upstreamable:** yes.
+- **Tests:** `secrets_test.go`:
+  - Legacy database (key in `server_config`, an encrypted CalDAV password, a plaintext GitHub token) with no key file: the key is adopted into a 0600 file, the password still decrypts, the token is encrypted, and the legacy key is gone.
+  - The same database with a different provided key: values are re-encrypted.
+  - A restart with the same key works, while a different or missing key file returns `ErrSecretKeyMismatch` and creates no new file.
+  - `TestGitHubTokenWriteOnly`: set, the `githubConnected` flag, a full settings save with `githubToken` that doesn't change it, no token in `/api/settings` or `/api/export`, no API or widget token in the export, invalid token → 400, and remove.

@@ -19,7 +19,8 @@ var ErrInvalid = errors.New("invalid entry")
 var ErrRegistrationClosed = errors.New("registration is closed")
 
 type Store struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	key []byte // credential encryption key, set by InitSecrets
 }
 
 type User struct {
@@ -92,9 +93,11 @@ type Settings struct {
 	QuotaMB      int      `json:"quotaMb"`
 	DigestTime   string   `json:"digestTime"` // "HH:MM" or ""
 	DefaultRate  *float64 `json:"defaultRate,omitempty"`
-	GithubToken  string   `json:"githubToken"` // PAT; never logged
-	WidgetToken  string   `json:"widgetToken"`
-	ApiToken     string   `json:"apiToken"`
+	// GithubConnected reports whether a GitHub token is stored. The token is
+	// write-only: set via SetGitHubToken, read server-side via GitHubToken.
+	GithubConnected bool   `json:"githubConnected"`
+	WidgetToken     string `json:"widgetToken"`
+	ApiToken        string `json:"apiToken"`
 	// Modules gates feature areas; absent key = enabled.
 	Modules         map[string]bool `json:"modules,omitempty"`
 	ActiveWorkspace *string         `json:"activeWorkspace,omitempty"`
@@ -794,18 +797,18 @@ func (s *Store) Settings(ctx context.Context, userID string) (Settings, error) {
 	var settings Settings
 	err := s.db.QueryRow(ctx, `
 		SELECT country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
-		       coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, coalesce(github_token,''),
+		       coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
 		       modules, active_workspace::text, default_view, nameday_country, invidious_url,
 		       coalesce(people_share_token, '') FROM settings WHERE user_id = $1
-	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubToken, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken)
+	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken)
 	return settings, err
 }
 
 func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Settings) (Settings, error) {
 	var out Settings
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, github_token, modules, active_workspace, default_view, nameday_country, invidious_url)
-		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, nullif($11, ''), coalesce($12::jsonb, '{}'::jsonb), $13::uuid, coalesce(nullif($14, ''), 'month'), $15, $16)
+		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, modules, active_workspace, default_view, nameday_country, invidious_url)
+		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, coalesce($11::jsonb, '{}'::jsonb), $12::uuid, coalesce(nullif($13, ''), 'month'), $14, $15)
 		ON CONFLICT (user_id) DO UPDATE
 		SET country = EXCLUDED.country,
 		    show_holidays = EXCLUDED.show_holidays,
@@ -816,17 +819,16 @@ func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Sett
 		    city = EXCLUDED.city,
 		    digest_time = EXCLUDED.digest_time,
 		    default_rate = EXCLUDED.default_rate,
-		    github_token = EXCLUDED.github_token,
 		    modules = EXCLUDED.modules,
 		    active_workspace = EXCLUDED.active_workspace,
 		    default_view = coalesce(EXCLUDED.default_view, 'month'),
 		    nameday_country = EXCLUDED.nameday_country,
 		    invidious_url = EXCLUDED.invidious_url
 		RETURNING country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
-		          coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, coalesce(github_token,''),
+		          coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
 		          modules, active_workspace::text, default_view, nameday_country, invidious_url
-	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.GithubToken, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL).
-		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubToken, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL)
+	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL).
+		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL)
 	return out, err
 }
 
@@ -2252,9 +2254,10 @@ func (s *Store) GitHubLinkedCards(ctx context.Context, userID string) ([]Entry, 
 	return out, rows.Err()
 }
 
-// GitHubUsers — everyone with a token set (the sync loop iterates them).
+// GitHubUsers — everyone with a token set (the sync loop iterates them),
+// tokens decrypted. Undecryptable tokens are skipped.
 func (s *Store) GitHubUsers(ctx context.Context) ([]struct{ UserID, Token string }, error) {
-	rows, err := s.db.Query(ctx, `SELECT user_id::text, github_token FROM settings WHERE github_token IS NOT NULL AND github_token <> ''`)
+	rows, err := s.db.Query(ctx, `SELECT user_id::text, github_token_enc FROM settings WHERE github_token_enc IS NOT NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -2262,12 +2265,49 @@ func (s *Store) GitHubUsers(ctx context.Context) ([]struct{ UserID, Token string
 	var out []struct{ UserID, Token string }
 	for rows.Next() {
 		var r struct{ UserID, Token string }
-		if err := rows.Scan(&r.UserID, &r.Token); err != nil {
+		var enc string
+		if err := rows.Scan(&r.UserID, &enc); err != nil {
 			return nil, err
+		}
+		if r.Token, err = s.Decrypt(ctx, enc); err != nil {
+			continue
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GitHubToken returns the user's decrypted GitHub token ("" when none).
+func (s *Store) GitHubToken(ctx context.Context, userID string) (string, error) {
+	var enc *string
+	err := s.db.QueryRow(ctx, `SELECT github_token_enc FROM settings WHERE user_id = $1`, userID).Scan(&enc)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && enc == nil) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return s.Decrypt(ctx, *enc)
+}
+
+// SetGitHubToken stores the token encrypted; "" removes it.
+func (s *Store) SetGitHubToken(ctx context.Context, userID, token string) error {
+	var enc *string
+	if token != "" {
+		v, err := s.Encrypt(ctx, token)
+		if err != nil {
+			return err
+		}
+		enc = &v
+	}
+	tag, err := s.db.Exec(ctx, `UPDATE settings SET github_token_enc = $2, github_token = NULL WHERE user_id = $1`, userID, enc)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SearchBoards — board-name match for the global search.

@@ -40,6 +40,8 @@ export function SettingsPage() {
   const restore = usePlanner((state) => state.restore);
   const api = usePlanner((state) => state.api);
   const rotateToken = usePlanner((state) => state.rotateToken);
+  const setGitHubToken = usePlanner((state) => state.setGitHubToken);
+  const [ghToken, setGhToken] = useState("");
   const toast = usePlanner((state) => state.toast);
   const user = usePlanner((state) => state.user);
   const logout = usePlanner((state) => state.logout);
@@ -435,16 +437,33 @@ export function SettingsPage() {
         <section className="panel">
           <h3>Integrations</h3>
           <div className="settings-grid">
-            <label className="field">
-              <span>GitHub token</span>
-              <input
-                type="password"
-                className="input"
-                placeholder="Personal access token — issues & PRs"
-                value={settings.githubToken ?? ""}
-                onChange={(e) => set({ githubToken: e.target.value })}
-              />
-            </label>
+            <div className="field">
+              <span>GitHub token{settings.githubConnected ? " — saved" : ""}</span>
+              <div className="token-row">
+                <input
+                  type="password"
+                  className="input"
+                  aria-label="GitHub token"
+                  autoComplete="off"
+                  placeholder={settings.githubConnected ? "Paste a new token to replace it" : "Personal access token — issues & PRs"}
+                  value={ghToken}
+                  onChange={(e) => setGhToken(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!ghToken.trim()}
+                  onClick={() => void setGitHubToken(ghToken.trim()).then((ok) => ok && setGhToken(""))}
+                >
+                  Save
+                </button>
+                {settings.githubConnected && (
+                  <button type="button" className="btn btn-secondary" onClick={() => void setGitHubToken("")}>
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
             <label className="field">
               <span>Invidious instance</span>
               <input

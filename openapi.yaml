@@ -711,6 +711,44 @@ paths:
                 properties:
                   apiToken:
                     type: string
+  /settings/github-token:
+    put:
+      summary: Store the GitHub token (encrypted; never returned — settings only report githubConnected)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  maxLength: 255
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  githubConnected:
+                    type: boolean
+        "400":
+          description: Empty or malformed token
+    delete:
+      summary: Remove the stored GitHub token
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  githubConnected:
+                    type: boolean
   /widget/today:
     get:
       summary: Token-gated read-only agenda for the embeddable widget
@@ -1239,7 +1277,7 @@ paths:
       summary: Global search — entries + files + boards + people
   /github/inbox:
     get:
-      summary: Open issues+PRs involving the user (needs settings.githubToken)
+      summary: Open issues+PRs involving the user (needs a token set via /settings/github-token)
   /github/activity:
     get:
       summary: Login + events this week

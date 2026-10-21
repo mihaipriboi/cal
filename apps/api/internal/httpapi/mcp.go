@@ -838,15 +838,15 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 		respond(toolText(string(data), false))
 
 	case "github_inbox":
-		st, err := s.store.Settings(ctx, user.ID)
-		if err != nil || st.GithubToken == "" {
+		token, err := s.store.GitHubToken(ctx, user.ID)
+		if err != nil || token == "" {
 			fail("no github token in settings")
 			return
 		}
 		var res struct {
 			Items []ghIssue `json:"items"`
 		}
-		if err := ghGet(ctx, st.GithubToken, "/search/issues?q="+url.QueryEscape("is:open involves:@me")+"&per_page=50", &res); err != nil {
+		if err := ghGet(ctx, token, "/search/issues?q="+url.QueryEscape("is:open involves:@me")+"&per_page=50", &res); err != nil {
 			fail("github fetch failed")
 			return
 		}

@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -60,8 +61,30 @@ func testDatabaseURL(t *testing.T) string {
 	return testPGURL
 }
 
-// newTestStore creates a fresh, migrated database on the shared instance.
+// newTestStore creates a fresh, migrated database on the shared instance,
+// with a credential key in a temp file.
 func newTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	st := newRawTestStore(t)
+	if err := st.InitSecrets(context.Background(), filepath.Join(t.TempDir(), "secret.key")); err != nil {
+		t.Fatalf("init secrets: %v", err)
+	}
+	return st
+}
+
+// newRawTestStore is newTestStore without InitSecrets.
+func newRawTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	pool, err := store.Connect(context.Background(), newTestDB(t))
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return store.New(pool)
+}
+
+// newTestDB creates a fresh, migrated database and returns its DSN.
+func newTestDB(t *testing.T) string {
 	t.Helper()
 	base := testDatabaseURL(t)
 
@@ -103,13 +126,7 @@ func newTestStore(t *testing.T) *store.Store {
 		t.Fatalf("migrate: %v", err)
 	}
 	_ = mig.Close()
-
-	pool, err := store.Connect(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return store.New(pool)
+	return dsn
 }
 
 // newEmptyTestServer serves the real router over httptest on a fresh

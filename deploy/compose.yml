@@ -10,7 +10,9 @@
 # back, set CAL_TAG to a sha-<commit> tag in .env. Old images: `docker image
 # prune -f`. A dump before updating is cheap insurance:
 #   docker compose exec -T db pg_dump -U cal -Fc cal > cal-$(date +%F).dump
-# Volumes: cal-pg = database, cal-data = uploads and app backups. Back up both.
+# Volumes: cal-pg = database, cal-data = uploads, app backups and secret.key
+# (the key for stored mail/CalDAV/GitHub credentials). Back up both: a
+# database restore without secret.key loses those credentials.
 
 services:
   cal:

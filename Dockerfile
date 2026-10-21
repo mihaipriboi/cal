@@ -9,7 +9,8 @@ WORKDIR /src
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/api-client/package.json packages/api-client/package.json
-RUN npm ci
+# No package needs an install script on Linux (fsevents is macOS-only).
+RUN npm ci --ignore-scripts
 COPY packages/api-client packages/api-client
 COPY apps/web apps/web
 RUN npm run build -w @cal/web
@@ -36,15 +37,19 @@ COPY --from=server /out/cal /usr/local/bin/cal
 USER cal
 ENV HOME=/home/cal DATA_DIR=/data PORT=8080
 
-# Pre-warm the embedded Postgres binary cache into the image so the first
-# container boot needs no network. Health check passing proves the download
-# and extraction completed before the process is stopped.
-RUN (cal & echo $! > /tmp/cal.pid); \
-    for i in $(seq 1 300); do \
-      curl -fsS http://localhost:8080/api/health >/dev/null 2>&1 && break; \
-      sleep 1; \
-    done; \
-    kill "$(cat /tmp/cal.pid)" 2>/dev/null; exit 0
+# Optional: pre-warm the embedded Postgres binary cache (downloaded from Maven
+# Central) into the image so a container without DATABASE_URL needs no network
+# on first boot. Off by default: with an external database (deploy/compose.yml)
+# it is never used. Build with --build-arg PREWARM_EMBEDDED_PG=true to enable.
+ARG PREWARM_EMBEDDED_PG=false
+RUN if [ "$PREWARM_EMBEDDED_PG" = "true" ]; then \
+      (cal & echo $! > /tmp/cal.pid); \
+      for i in $(seq 1 300); do \
+        curl -fsS http://localhost:8080/api/health >/dev/null 2>&1 && break; \
+        sleep 1; \
+      done; \
+      kill "$(cat /tmp/cal.pid)" 2>/dev/null; \
+    fi; exit 0
 
 EXPOSE 8080
 VOLUME /data

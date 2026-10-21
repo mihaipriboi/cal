@@ -33,6 +33,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-014](#fc-014--optional-network-restriction-for-the-mail-api) | API | Optional `MAIL_ALLOWED_NETS` limits the Mail API to listed networks | yes |
 | [FC-015](#fc-015--address-check-at-connect-time-for-user-supplied-urls) | API | Link previews, feeds and webhooks check the address actually dialed, on every redirect | yes |
 | [FC-016](#fc-016--deploy-compose-follows-latest) | deploy | `deploy/compose.yml` follows `latest`; updating is `docker compose pull && docker compose up -d` | no |
+| [FC-017](#fc-017--image-build-fetches-and-runs-less) | build | No embedded-Postgres download and no npm install scripts during the image build | yes |
 
 ## Details
 
@@ -232,3 +233,18 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - `docker compose config` resolves the image to `:latest` with `CAL_TAG` unset or empty, and to the pinned tag when set.
   - Docker Compose 5.6.0 confirms `pull` re-pulls a present tag without `pull_policy`, and skips it with `pull_policy: missing`.
   - `actionlint` v1.7.7 passes on `fork-image.yml`.
+
+### FC-017 — Image build fetches and runs less
+
+- **Why:**
+  - The Dockerfile booted the server once during the build to "pre-warm" the embedded Postgres. That downloads about 80 MB of executables from Maven Central, whose checksum check is skipped if the checksum can't be fetched, and bakes an initialised cluster into a layer. Deployments with an external database (`DATABASE_URL`, as in both compose files) never use it.
+  - `npm ci` also ran package install scripts, which no dependency needs on Linux. The only one is `fsevents`, which is macOS-only and not installed.
+- **What changed:** `Dockerfile`.
+  - The pre-warm runs only with `--build-arg PREWARM_EMBEDDED_PG=true`. The default is `false`.
+  - The web stage uses `npm ci --ignore-scripts`.
+  - The root `docker-compose.yml` comment notes that a single-container setup downloads the binaries on first start unless the image was pre-warmed.
+- **Compatibility:**
+  - Images with an external database behave the same and are smaller.
+  - A container started *without* `DATABASE_URL` now downloads the embedded Postgres on first boot (needs network), unless built with the argument.
+- **Upstreamable:** yes.
+- **Tests:** `docker build` of the image, with the build log checked for no Maven traffic, and a smoke run against an external Postgres.

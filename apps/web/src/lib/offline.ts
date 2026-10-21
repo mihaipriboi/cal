@@ -18,12 +18,16 @@ export function cacheUser(user: User): void {
   write("user", user);
 }
 
-export function clearCachedUser(): void {
+// clearCachedData forgets the signed-in user's data on logout: the cached
+// user, the entries snapshot and the service worker's API response cache.
+export function clearCachedData(): void {
   try {
     localStorage.removeItem(prefix + "user");
+    localStorage.removeItem(prefix + "entries");
   } catch {
     // no storage
   }
+  if (typeof caches !== "undefined") void caches.delete("cal-api").catch(() => undefined);
 }
 
 export function readCachedSettings(): Settings {
@@ -42,8 +46,10 @@ export function readCachedSettings(): Settings {
   );
 }
 
+// Tokens stay out of localStorage: the server returns them with the settings
+// on every load, and a cached copy would outlive logout.
 export function cacheSettings(settings: Settings): void {
-  write("settings", settings);
+  write("settings", { ...settings, widgetToken: "", apiToken: "", peopleShareToken: undefined });
 }
 
 function read<T>(key: string): T | undefined {

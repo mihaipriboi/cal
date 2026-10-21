@@ -19,7 +19,7 @@ import {
   cacheEntries,
   cacheSettings,
   cacheUser,
-  clearCachedUser,
+  clearCachedData,
   readCachedEntries,
   readCachedSettings,
   readCachedUser,
@@ -194,7 +194,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       await get().api.logout();
     } finally {
       get().api.setSession("");
-      clearCachedUser();
+      clearCachedData();
       set({ user: undefined, entries: [], holidays: [] });
     }
   },

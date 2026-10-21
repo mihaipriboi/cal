@@ -40,6 +40,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-021](#fc-021--no-property-injection-through-icalendar-urlimage) | ICS | CR/LF can't inject properties into `feed.ics` or CalDAV pushes | yes |
 | [FC-022](#fc-022--note-links-and-images-limited-to-safe-urls) | web | Markdown links only for http(s)/mailto/same-origin; no protocol-relative images | yes |
 | [FC-023](#fc-023--web-session-stays-in-the-httponly-cookie) | auth | Web client keeps no session token; `?session=` only authorizes GET/HEAD | yes |
+| [FC-024](#fc-024--logout-clears-cached-personal-data) | web | Logout drops the entries snapshot and API cache; tokens never cached in localStorage | yes |
 
 ## Details
 
@@ -316,3 +317,16 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Tests:**
   - `lib/remote.test.ts`: on a plain web page no token is stored and asset URLs are unsigned; in the Capacitor shell the token is stored and URLs are signed.
   - `TestQuerySessionOnlyForReads`: GET with `?session=` → 200, PUT/POST with it → 401, Bearer POST works.
+
+### FC-024 — Logout clears cached personal data
+
+- **Why:** logging out removed only the cached user. Three things stayed in the browser:
+  - the offline entries snapshot (`cal:entries`, all entries);
+  - the service worker's `cal-api` cache of `/api/entries` and `/api/holidays` responses;
+  - `cal:settings`, which also held the API, widget and people-share tokens.
+- **What changed:** `lib/offline.ts`, `stores/planner.ts`.
+  - Logout calls `clearCachedData()`, which removes the cached user and the entries snapshot and deletes the `cal-api` Cache Storage bucket.
+  - `cacheSettings` blanks `widgetToken`, `apiToken` and `peopleShareToken` before writing. The server returns them with the settings on every load. The rest of the settings cache, such as the theme for the login screen, is kept.
+- **Compatibility:** after logout, an offline reload no longer shows the previous user's entries. The pending offline write queue (`cal:opq`) is left as is, so unsynced edits aren't discarded.
+- **Upstreamable:** yes.
+- **Tests:** `lib/offline.test.ts`: tokens never reach `cal:settings`; logout clears the user and entries, keeps the theme, and deletes the `cal-api` cache.

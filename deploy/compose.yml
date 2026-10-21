@@ -4,14 +4,17 @@
 #   cp .env.example .env && chmod 600 .env   # then fill it in
 #   docker compose up -d
 #
-# Updating: run the workflow, set CAL_TAG to the new sha-<commit> tag, then
-# `docker compose up -d`. Nothing updates unless CAL_TAG changes.
+# Updating: `docker compose pull && docker compose up -d`. The image follows
+# the `latest` tag, which moves only when the manual "Fork image" workflow is
+# run on main, so nothing changes until you pull. To hold a version or roll
+# back, set CAL_TAG to a sha-<commit> tag in .env. Old images: `docker image
+# prune -f`. A dump before updating is cheap insurance:
+#   docker compose exec -T db pg_dump -U cal -Fc cal > cal-$(date +%F).dump
 # Volumes: cal-pg = database, cal-data = uploads and app backups. Back up both.
 
 services:
   cal:
-    image: ghcr.io/mihaipriboi/cal:${CAL_TAG:?set CAL_TAG to a published tag, e.g. sha-abc1234}
-    pull_policy: missing
+    image: ghcr.io/mihaipriboi/cal:${CAL_TAG:-latest}
     environment:
       DATABASE_URL: postgres://cal:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/cal?sslmode=disable
       PORT: "8080"

@@ -414,7 +414,7 @@ func (s *Server) mcpAuth(c *gin.Context) (store.User, bool) {
 	if token == "" || token == c.GetHeader("Authorization") {
 		return store.User{}, false
 	}
-	user, err := s.store.UserByApiToken(c.Request.Context(), token)
+	user, err := s.store.UserByToken(c.Request.Context(), store.TokenAPI, token)
 	if err != nil {
 		return store.User{}, false
 	}

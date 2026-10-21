@@ -49,7 +49,7 @@ export function readCachedSettings(): Settings {
 // Tokens stay out of localStorage: the server returns them with the settings
 // on every load, and a cached copy would outlive logout.
 export function cacheSettings(settings: Settings): void {
-  write("settings", { ...settings, widgetToken: "", apiToken: "", peopleShareToken: undefined });
+  write("settings", { ...settings, widgetToken: "", apiToken: "", intakeToken: undefined, feedToken: undefined, peopleShareToken: undefined });
 }
 
 function read<T>(key: string): T | undefined {

@@ -44,6 +44,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-025](#fc-025--all-workflow-actions-pinned-by-commit) | CI | Every GitHub Action is pinned to a commit SHA | yes |
 | [FC-026](#fc-026--credential-key-outside-the-database-github-token-encrypted-and-write-only) | security | Encryption key moves to `DATA_DIR/secret.key`; GitHub token encrypted, write-only; tokens left out of exports/backups | yes |
 | [FC-027](#fc-027--closing-linked-github-issues-is-opt-in) | API | Completing a card closes its GitHub issue only if `githubCloseIssues` is on | yes |
+| [FC-028](#fc-028--one-token-per-capability) | auth | Separate tokens for MCP, email intake, ICS feed and widget | yes |
 
 ## Details
 
@@ -386,3 +387,25 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** behaviour change. Existing users who relied on auto-close must turn it on. Reading GitHub (inbox, card sync from GitHub to Cal) is unchanged.
 - **Upstreamable:** yes.
 - **Tests:** `TestGitHubCloseIssueIsOptIn`, against a stub GitHub API: completing a linked card sends no PATCH with the setting off and exactly one with it on.
+
+### FC-028 — One token per capability
+
+- **Why:** two tokens covered four capabilities.
+  - The API token was the only credential for both `/api/mcp` (full read/write over entries, people, files and the GitHub inbox) and `/api/intake`, which is meant to be handed to a mail-forwarding service. Leaking the intake URL therefore leaked the whole account.
+  - The widget token, described as read-only for the Today widget, also unlocked `/api/feed.ics`, the export of all tasks and events with descriptions.
+- **What changed:**
+  - Migration `10004` adds `settings.intake_token` and `settings.feed_token`, seeded from `api_token` and `widget_token` respectively.
+  - `store.UserByToken(kind, token)` and `store.RegenerateToken(kind)` replace the per-token functions. Kinds are `TokenAPI` (MCP), `TokenIntake` (`/api/intake`, create-only), `TokenFeed` (`/api/feed.ics`) and `TokenWidget` (`/api/widget/today`). An empty token never matches.
+  - New rotate endpoints `POST /api/settings/intake-token` and `/api/settings/feed-token`. One `rotateToken` handler serves all four.
+  - `/api/intake` also accepts the token as `Authorization: Bearer`.
+  - Exports and backups blank the new tokens too, and the web settings cache never stores them.
+  - Web Settings: the intake URL is shown with its own copy and rotate buttons, and the ICS URL uses the feed token with its own rotate button.
+  - `openapi.yaml` is updated.
+- **Compatibility:**
+  - Existing intake and ICS URLs keep working, because the new tokens start as copies.
+  - Rotating the API token no longer changes the intake URL, and rotating the widget token no longer changes the ICS URL.
+  - API: settings gain `intakeToken` and `feedToken`.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestTokensAreScoped`: the four tokens are distinct, and each one opens only its own endpoint (intake, feed, widget, MCP). Intake also works with a Bearer header, and rotation retires the old intake token.
+  - `TestScopedTokenMigrationKeepsURLs`: on a database migrated to `10003` with an existing user, `10004` seeds `intake_token = api_token` and `feed_token = widget_token`.

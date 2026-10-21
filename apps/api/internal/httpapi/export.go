@@ -33,7 +33,7 @@ const (
 // exportSettings drops access tokens from settings bound for an export file
 // or a backup: they grant access, and restore never reads settings back.
 func exportSettings(st store.Settings) store.Settings {
-	st.WidgetToken, st.ApiToken, st.PeopleShareToken = "", "", ""
+	st.WidgetToken, st.ApiToken, st.IntakeToken, st.FeedToken, st.PeopleShareToken = "", "", "", "", ""
 	return st
 }
 
@@ -390,7 +390,7 @@ func (s *Server) writeRestoredFiles(ctx context.Context, userID string, files []
 }
 
 func (s *Server) exportICS(c *gin.Context) {
-	user, err := s.store.UserByWidgetToken(c.Request.Context(), c.Query("token"))
+	user, err := s.store.UserByToken(c.Request.Context(), store.TokenFeed, c.Query("token"))
 	if err != nil {
 		c.String(http.StatusUnauthorized, "invalid token")
 		return

@@ -98,9 +98,14 @@ type Settings struct {
 	GithubConnected bool `json:"githubConnected"`
 	// GithubCloseIssues closes a card's linked GitHub issue when the card is
 	// completed (a write to GitHub). Off unless chosen.
-	GithubCloseIssues bool   `json:"githubCloseIssues"`
-	WidgetToken       string `json:"widgetToken"`
-	ApiToken          string `json:"apiToken"`
+	GithubCloseIssues bool `json:"githubCloseIssues"`
+	// One token per capability: ApiToken = MCP (full access), IntakeToken =
+	// create tasks via /api/intake, FeedToken = read the ICS export,
+	// WidgetToken = today's agenda for widgets.
+	WidgetToken string `json:"widgetToken"`
+	ApiToken    string `json:"apiToken"`
+	IntakeToken string `json:"intakeToken"`
+	FeedToken   string `json:"feedToken"`
 	// Modules gates feature areas; absent key = enabled.
 	Modules         map[string]bool `json:"modules,omitempty"`
 	ActiveWorkspace *string         `json:"activeWorkspace,omitempty"`
@@ -802,8 +807,8 @@ func (s *Store) Settings(ctx context.Context, userID string) (Settings, error) {
 		SELECT country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
 		       coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
 		       modules, active_workspace::text, default_view, nameday_country, invidious_url,
-		       coalesce(people_share_token, ''), github_close_issues FROM settings WHERE user_id = $1
-	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken, &settings.GithubCloseIssues)
+		       coalesce(people_share_token, ''), github_close_issues, intake_token, feed_token FROM settings WHERE user_id = $1
+	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken, &settings.GithubCloseIssues, &settings.IntakeToken, &settings.FeedToken)
 	return settings, err
 }
 
@@ -830,53 +835,47 @@ func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Sett
 		    github_close_issues = EXCLUDED.github_close_issues
 		RETURNING country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
 		          coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
-		          modules, active_workspace::text, default_view, nameday_country, invidious_url, github_close_issues
+		          modules, active_workspace::text, default_view, nameday_country, invidious_url, github_close_issues,
+		          intake_token, feed_token
 	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL, settings.GithubCloseIssues).
-		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL, &out.GithubCloseIssues)
+		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL, &out.GithubCloseIssues, &out.IntakeToken, &out.FeedToken)
 	return out, err
 }
 
-// RegenerateWidgetToken rotates the read-only widget share token.
-func (s *Store) RegenerateWidgetToken(ctx context.Context, userID string) (string, error) {
+// Token kinds, each a settings column unlocking one capability.
+const (
+	TokenAPI    = "api_token"    // MCP: full read/write
+	TokenIntake = "intake_token" // POST /api/intake: create tasks
+	TokenFeed   = "feed_token"   // GET /api/feed.ics: read the ICS export
+	TokenWidget = "widget_token" // today's agenda for widgets
+)
+
+func validTokenColumn(column string) bool {
+	return column == TokenAPI || column == TokenIntake || column == TokenFeed || column == TokenWidget
+}
+
+// RegenerateToken rotates one of the user's capability tokens.
+func (s *Store) RegenerateToken(ctx context.Context, userID, column string) (string, error) {
+	if !validTokenColumn(column) {
+		return "", ErrInvalid
+	}
 	var token string
 	err := s.db.QueryRow(ctx, `
-		UPDATE settings SET widget_token = replace(gen_random_uuid()::text, '-', '')
-		WHERE user_id = $1 RETURNING widget_token
-	`, userID).Scan(&token)
+		UPDATE settings SET `+column+` = replace(gen_random_uuid()::text, '-', '')
+		WHERE user_id = $1 RETURNING `+column, userID).Scan(&token)
 	return token, err
 }
 
-// UserByWidgetToken resolves the owner of a widget share token (read-only use).
-func (s *Store) UserByWidgetToken(ctx context.Context, token string) (User, error) {
-	var u User
-	err := s.db.QueryRow(ctx, `
-		SELECT users.id::text, users.email
-		FROM settings JOIN users ON users.id = settings.user_id
-		WHERE settings.widget_token = $1
-	`, token).Scan(&u.ID, &u.Email)
-	if errors.Is(err, pgx.ErrNoRows) {
+// UserByToken resolves the owner of a capability token of the given kind.
+func (s *Store) UserByToken(ctx context.Context, column, token string) (User, error) {
+	if !validTokenColumn(column) || token == "" {
 		return User{}, ErrNotFound
 	}
-	return u, err
-}
-
-// RegenerateApiToken rotates the MCP/API access token.
-func (s *Store) RegenerateApiToken(ctx context.Context, userID string) (string, error) {
-	var token string
-	err := s.db.QueryRow(ctx, `
-		UPDATE settings SET api_token = replace(gen_random_uuid()::text, '-', '')
-		WHERE user_id = $1 RETURNING api_token
-	`, userID).Scan(&token)
-	return token, err
-}
-
-// UserByApiToken resolves the owner of an API token (used by the MCP endpoint).
-func (s *Store) UserByApiToken(ctx context.Context, token string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
 		SELECT users.id::text, users.email
 		FROM settings JOIN users ON users.id = settings.user_id
-		WHERE settings.api_token = $1
+		WHERE settings.`+column+` = $1
 	`, token).Scan(&u.ID, &u.Email)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound

@@ -86,6 +86,12 @@ func newRawTestStore(t *testing.T) *store.Store {
 // newTestDB creates a fresh, migrated database and returns its DSN.
 func newTestDB(t *testing.T) string {
 	t.Helper()
+	return newTestDBAt(t, 0)
+}
+
+// newTestDBAt migrates only up to version (0 = all), for migration tests.
+func newTestDBAt(t *testing.T, version int64) string {
+	t.Helper()
 	base := testDatabaseURL(t)
 
 	admin, err := sql.Open("pgx", base)
@@ -122,7 +128,12 @@ func newTestDB(t *testing.T) string {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	if err := goose.Up(mig, "."); err != nil {
+	if version > 0 {
+		err = goose.UpTo(mig, ".", version)
+	} else {
+		err = goose.Up(mig, ".")
+	}
+	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	_ = mig.Close()

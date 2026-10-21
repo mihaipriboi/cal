@@ -8,7 +8,7 @@ describe("offline cache", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("never stores tokens with the settings", () => {
-    cacheSettings({ ...readCachedSettings(), theme: "dark", widgetToken: "w-secret", apiToken: "a-secret", peopleShareToken: "p-secret" } as Settings);
+    cacheSettings({ ...readCachedSettings(), theme: "dark", widgetToken: "w-secret", apiToken: "a-secret", intakeToken: "i-secret", feedToken: "f-secret", peopleShareToken: "p-secret" } as Settings);
     const raw = localStorage.getItem("cal:settings") ?? "";
     expect(raw).not.toMatch(/secret/);
     expect(readCachedSettings().theme).toBe("dark");

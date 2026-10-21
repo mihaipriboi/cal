@@ -1,6 +1,7 @@
 package httpapi
 
-// Email-to-task intake: POST /api/intake?token=<apiToken> with
+// Email-to-task intake: POST /api/intake?token=<intakeToken> (or
+// Authorization: Bearer <intakeToken>) with
 // {subject, text, date?} creates a task. Any forwarding service (or a local
 // MTA pipe) can hit it — a procmail one-liner to curl covers self-hosters.
 
@@ -15,7 +16,13 @@ import (
 )
 
 func (s *Server) intake(c *gin.Context) {
-	user, err := s.store.UserByApiToken(c.Request.Context(), c.Query("token"))
+	// The intake token can only create tasks here; services that can't set
+	// headers pass it in the query.
+	token := c.Query("token")
+	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+	}
+	user, err := s.store.UserByToken(c.Request.Context(), store.TokenIntake, token)
 	if err != nil {
 		c.String(http.StatusUnauthorized, "invalid token")
 		return

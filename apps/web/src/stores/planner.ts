@@ -105,7 +105,7 @@ interface PlannerState {
   removePerson: (id: string) => Promise<void>;
   importIcs: (file: File) => Promise<void>;
   restore: (file: File) => Promise<void>;
-  rotateToken: (kind: "widget" | "api") => Promise<void>;
+  rotateToken: (kind: "widget" | "api" | "intake" | "feed") => Promise<void>;
   setGitHubToken: (token: string) => Promise<boolean>;
   updateSettings: (settings: Settings) => Promise<void>;
   toast: (message: string, action?: Toast["action"]) => void;
@@ -653,10 +653,12 @@ export const usePlanner = create<PlannerState>((set, get) => ({
 
   async rotateToken(kind) {
     try {
-      const token = kind === "widget" ? await get().api.rotateWidgetToken() : await get().api.rotateApiToken();
+      const api = get().api;
       const settings = { ...get().settings };
-      if (kind === "widget") settings.widgetToken = token;
-      else settings.apiToken = token;
+      if (kind === "widget") settings.widgetToken = await api.rotateWidgetToken();
+      else if (kind === "api") settings.apiToken = await api.rotateApiToken();
+      else if (kind === "intake") settings.intakeToken = await api.rotateIntakeToken();
+      else settings.feedToken = await api.rotateFeedToken();
       cacheSettings(settings);
       set({ settings });
       get().toast("Token rotated");

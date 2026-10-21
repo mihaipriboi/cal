@@ -309,7 +309,8 @@ export function SettingsPage() {
 
   const origin = api.remote || location.origin;
   const widgetUrl = `${origin}/widget/today?token=${settings.widgetToken}`;
-  const icsUrl = `${origin}/api/feed.ics?token=${settings.widgetToken}`;
+  const icsUrl = `${origin}/api/feed.ics?token=${settings.feedToken ?? ""}`;
+  const intakeUrl = `${origin}/api/intake?token=${settings.intakeToken ?? ""}`;
   const mcpConfig = JSON.stringify(
     { mcpServers: { cal: { url: `${origin}/api/mcp`, headers: { Authorization: `Bearer ${settings.apiToken}` } } } },
     null,
@@ -837,9 +838,18 @@ export function SettingsPage() {
             </button>
           </div>
           <p className="panel-note" style={{ marginTop: 8 }}>
-            Email-to-task: forward mail to <code>POST /api/intake?token=&lt;api token&gt;</code> with
-            {" "}<code>{"{subject, text}"}</code> — lands as a task tagged <code>inbox</code>.
+            Email-to-task: POST <code>{"{subject, text}"}</code> to this URL — lands as a task tagged{" "}
+            <code>inbox</code>. Its token can only create tasks.
           </p>
+          <div className="token-row">
+            <code className="token">{intakeUrl}</code>
+            <button type="button" className="icon-btn" aria-label="Copy intake URL" onClick={() => copy(intakeUrl, "URL")}>
+              <Copy size={14} />
+            </button>
+            <button type="button" className="icon-btn" aria-label="Rotate intake token" onClick={() => void rotateToken("intake")}>
+              <RefreshCw size={14} />
+            </button>
+          </div>
         </section>
 
         <section className="panel">
@@ -1036,12 +1046,15 @@ export function SettingsPage() {
           <pre className="code-block" tabIndex={0}>{`<iframe src="${widgetUrl}" style="border:0;width:100%;height:320px"></iframe>`}</pre>
           <p className="panel-note" style={{ marginTop: 10 }}>
             Or subscribe to Cal itself in any calendar app — this URL serves a live .ics feed of your tasks and
-            events:
+            events (its own token, separate from the widget's):
           </p>
           <div className="token-row">
             <code className="token">{icsUrl}</code>
             <button type="button" className="icon-btn" aria-label="Copy feed URL" onClick={() => copy(icsUrl, "URL")}>
               <Copy size={14} />
+            </button>
+            <button type="button" className="icon-btn" aria-label="Rotate feed token" onClick={() => void rotateToken("feed")}>
+              <RefreshCw size={14} />
             </button>
           </div>
         </section>

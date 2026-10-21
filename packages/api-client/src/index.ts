@@ -158,8 +158,14 @@ export interface Settings {
   githubConnected?: boolean;
   /** Completing a card closes its linked GitHub issue (off by default). */
   githubCloseIssues?: boolean;
+  /** Today's agenda for widgets. */
   widgetToken: string;
+  /** MCP: full read/write access. */
   apiToken: string;
+  /** POST /api/intake: create tasks only. */
+  intakeToken?: string;
+  /** GET /api/feed.ics: read-only calendar export. */
+  feedToken?: string;
   /** Feature modules on/off; absent key = enabled. */
   modules?: Record<string, boolean>;
   /** Calendar view fresh devices open on; per-device last-used view still wins. */
@@ -1150,6 +1156,16 @@ export class CalApi {
   async rotateApiToken(): Promise<string> {
     const out = await this.request<{ apiToken: string }>("/settings/api-token", { method: "POST" });
     return out.apiToken;
+  }
+
+  async rotateIntakeToken(): Promise<string> {
+    const out = await this.request<{ intakeToken: string }>("/settings/intake-token", { method: "POST" });
+    return out.intakeToken;
+  }
+
+  async rotateFeedToken(): Promise<string> {
+    const out = await this.request<{ feedToken: string }>("/settings/feed-token", { method: "POST" });
+    return out.feedToken;
   }
 
   /** Stores the GitHub token ("" removes it); returns whether one is set. */

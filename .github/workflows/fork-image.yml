@@ -85,5 +85,5 @@ jobs:
             echo "$TAGS"
             echo '```'
             echo
-            echo "Pin \`CAL_TAG=sha-${GITHUB_SHA::7}\` in the deploy .env."
+            echo "Deploy hosts on \`latest\`: \`docker compose pull && docker compose up -d\`. To pin this build instead: \`CAL_TAG=sha-${GITHUB_SHA::7}\`."
           } >> "$GITHUB_STEP_SUMMARY"

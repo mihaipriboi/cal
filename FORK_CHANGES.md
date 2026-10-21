@@ -32,6 +32,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-013](#fc-013--android-mail-requires-tls-and-checks-the-host) | Android | Native mail requires STARTTLS on plain ports and verifies the certificate hostname | yes |
 | [FC-014](#fc-014--optional-network-restriction-for-the-mail-api) | API | Optional `MAIL_ALLOWED_NETS` limits the Mail API to listed networks | yes |
 | [FC-015](#fc-015--address-check-at-connect-time-for-user-supplied-urls) | API | Link previews, feeds and webhooks check the address actually dialed, on every redirect | yes |
+| [FC-016](#fc-016--deploy-compose-follows-latest) | deploy | `deploy/compose.yml` follows `latest`; updating is `docker compose pull && docker compose up -d` | no |
 
 ## Details
 
@@ -216,3 +217,18 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - `TestOutboundClientRefusesBlockedRedirect`: a POST redirected (307) from an allowed host to a blocked one never reaches the second server.
   - `TestOutboundClientRedirectLimits`: the hop count and non-http schemes.
   - `TestDeliverWebhookPrivateOptOut` and `TestFetchICSPrivateOptOutFollowsRedirect`: both opt-outs.
+
+### FC-016 — Deploy compose follows `latest`
+
+- **Why:** with `CAL_TAG` required (FC-010), every update meant editing `.env`. A moving tag alone wouldn't have helped: with `pull_policy: missing`, `docker compose pull` skips images already present ("Image is already present locally").
+- **What changed:**
+  - `deploy/compose.yml` uses `ghcr.io/mihaipriboi/cal:${CAL_TAG:-latest}` and no longer sets `pull_policy`, so `docker compose pull && docker compose up -d` updates both Cal and `postgres:16-alpine` (patch releases).
+  - `latest` still moves only when the manual "Fork image" workflow runs on `main` (FC-009), so a host changes only when someone pulls.
+  - `CAL_TAG` is optional. Set it to a `sha-<commit>` tag to hold a version or roll back.
+  - The compose header documents the update, rollback and prune steps and a pre-update `pg_dump`. `.env.example` and the workflow summary text match.
+- **Compatibility:** hosts that already set `CAL_TAG` keep that pin until they clear it.
+- **Upstreamable:** no.
+- **Tests:**
+  - `docker compose config` resolves the image to `:latest` with `CAL_TAG` unset or empty, and to the pinned tag when set.
+  - Docker Compose 5.6.0 confirms `pull` re-pulls a present tag without `pull_policy`, and skips it with `pull_policy: missing`.
+  - `actionlint` v1.7.7 passes on `fork-image.yml`.

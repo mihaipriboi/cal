@@ -23,7 +23,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var webhookClient = &http.Client{Timeout: 5 * time.Second}
+// webhookClient refuses private addresses on every connection, redirects
+// included; privateWebhookClient serves CAL_ALLOW_PRIVATE_WEBHOOKS.
+var (
+	webhookClient        = newOutboundClient(5*time.Second, isBlockedIP)
+	privateWebhookClient = newOutboundClient(5*time.Second, nil)
+)
 
 func (s *Server) listWebhooks(c *gin.Context) {
 	hooks, err := s.store.Webhooks(c.Request.Context(), currentUser(c).ID)
@@ -109,10 +114,13 @@ func deliverWebhook(ctx context.Context, hookURL, secret, event string, payload 
 	if err != nil {
 		return err
 	}
+	client := webhookClient
 	if os.Getenv("CAL_ALLOW_PRIVATE_WEBHOOKS") == "" {
 		if err := checkURL(u); err != nil {
 			return err
 		}
+	} else {
+		client = privateWebhookClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(payload))
 	if err != nil {
@@ -123,7 +131,7 @@ func deliverWebhook(ctx context.Context, hookURL, secret, event string, payload 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Cal-Event", event)
 	req.Header.Set("X-Cal-Signature", hex.EncodeToString(mac.Sum(nil)))
-	resp, err := webhookClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

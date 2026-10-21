@@ -1,8 +1,8 @@
 package httpapi
 
 // Link unfurling: server-side fetch of <title>, favicon and og:image for a
-// URL. SSRF-guarded: http(s) only, private/loopback addresses refused after
-// DNS resolution and after each redirect.
+// URL. SSRF-guarded: http(s) only, private/loopback addresses refused on
+// every connection, including each redirect hop (outbound.go).
 
 import (
 	"context"
@@ -19,18 +19,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var unfurlClient = &http.Client{
-	Timeout: 8 * time.Second,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 3 {
-			return errors.New("too many redirects")
-		}
-		return checkURL(req.URL)
-	},
-}
+// unfurlClient also fetches feeds; see outbound.go for the address guard.
+var unfurlClient = newOutboundClient(8*time.Second, isBlockedIP)
 
-// checkURL refuses non-http schemes and hosts that resolve to private,
-// loopback, link-local or unspecified addresses.
+// checkURL refuses non-http schemes and hosts that resolve to blocked
+// addresses. It gives an early, readable error; the dialer guard in
+// newOutboundClient is what enforces it on the connection actually made.
 func checkURL(u *url.URL) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return errors.New("scheme not allowed")
@@ -44,9 +38,8 @@ func checkURL(u *url.URL) error {
 		return errors.New("host unresolvable")
 	}
 	for _, ipa := range ips {
-		ip := ipa.IP
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
-			return errors.New("private address")
+		if isBlockedIP(ipa.IP) {
+			return errPrivateAddress
 		}
 	}
 	return nil

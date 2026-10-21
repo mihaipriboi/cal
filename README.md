@@ -161,7 +161,7 @@ All configuration is via environment variables:
 | `TRUSTED_PROXIES` | unset | comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` is honored (e.g. `10.0.0.5`). Unset trusts none, so the client IP is the connecting peer |
 | `MAIL_ALLOWED_NETS` | unset | comma-separated IPs/CIDRs allowed to use the Mail API (e.g. `192.168.1.0/24,10.6.0.0/24`); other clients get 403. Uses the same client IP as rate limiting, so set `TRUSTED_PROXIES` when behind a proxy. Unset allows all |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | enable Google Calendar sync |
-| `CAL_ALLOW_PRIVATE_FEEDS` / `CAL_ALLOW_PRIVATE_WEBHOOKS` | unset | allow private/LAN URLs (SSRF guard off) |
+| `CAL_ALLOW_PRIVATE_FEEDS` / `CAL_ALLOW_PRIVATE_WEBHOOKS` | unset | allow private/LAN URLs for feeds / webhooks (SSRF guard off for that feature; link previews stay guarded) |
 
 Never commit `.env` — if a secret was ever committed, rotate it.
 

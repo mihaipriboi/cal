@@ -35,6 +35,10 @@ type feedEvent struct {
 	Details   string  `json:"details,omitempty"`
 }
 
+// privateFeedClient serves CAL_ALLOW_PRIVATE_FEEDS: same limits as
+// unfurlClient, no address guard.
+var privateFeedClient = newOutboundClient(8*time.Second, nil)
+
 // fetchICS downloads a feed body — SSRF-guarded like unfurl — and converts
 // RSS/Atom documents to ICS so the cache pipeline stays format-agnostic.
 func fetchICS(rawURL string) (string, error) {
@@ -43,14 +47,17 @@ func fetchICS(rawURL string) (string, error) {
 		return "", errors.New("feed URL must be http(s)")
 	}
 	// SSRF guard — refused for private/loopback unless opted into for local
-	// testing (CAL_ALLOW_PRIVATE_FEEDS=1). Also enforced per-redirect via
-	// unfurlClient's CheckRedirect.
+	// testing (CAL_ALLOW_PRIVATE_FEEDS=1). Also enforced on every connection,
+	// redirects included, by unfurlClient's dialer.
+	client := unfurlClient
 	if os.Getenv("CAL_ALLOW_PRIVATE_FEEDS") == "" {
 		if err := checkURL(u); err != nil {
 			return "", errors.New("feed URL not allowed: " + err.Error())
 		}
+	} else {
+		client = privateFeedClient
 	}
-	resp, err := unfurlClient.Get(u.String())
+	resp, err := client.Get(u.String())
 	if err != nil {
 		return "", err
 	}

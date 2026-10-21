@@ -31,6 +31,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-012](#fc-012--cors-exact-origin-matching) | API | CORS matches origins by parsed host instead of string prefix | yes |
 | [FC-013](#fc-013--android-mail-requires-tls-and-checks-the-host) | Android | Native mail requires STARTTLS on plain ports and verifies the certificate hostname | yes |
 | [FC-014](#fc-014--optional-network-restriction-for-the-mail-api) | API | Optional `MAIL_ALLOWED_NETS` limits the Mail API to listed networks | yes |
+| [FC-015](#fc-015--address-check-at-connect-time-for-user-supplied-urls) | API | Link previews, feeds and webhooks check the address actually dialed, on every redirect | yes |
 
 ## Details
 
@@ -191,3 +192,27 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** opt-in, so there's no change unless the variable is set. The native Android mail client talks to the mail server directly and isn't affected.
 - **Upstreamable:** yes.
 - **Tests:** `TestRequireClientNet` covers LAN direct, VPN via the proxy, internet via the proxy, a spoofed left-most `X-Forwarded-For`, an untrusted peer, IPv6, and the unset case.
+
+### FC-015 — Address check at connect time for user-supplied URLs
+
+- **Why:** link previews, feed subscriptions and webhooks fetch URLs supplied by the user. The private-address guard (`checkURL`) resolved the hostname and checked the answer, but the HTTP client then resolved it again to connect. A DNS server that answers differently the second time (DNS rebinding) could steer the request to an internal address. Webhook delivery also used a client with Go's default redirect policy: it followed up to 10 redirects without re-checking them, and kept the POST body on 307/308. The checked ranges also missed shared address space (`100.64.0.0/10`), `0.0.0.0/8` and IPv6 translation prefixes such as NAT64.
+- **What changed:** new `httpapi/outbound.go`, used by `unfurl.go`, `feeds.go` and `webhooks.go`.
+  - `newOutboundClient` builds a client whose dialer refuses blocked addresses in `net.Dialer.Control`. The check runs on the IP actually being connected to, on every connection, so it covers each redirect hop and changed DNS answers.
+  - The blocked list (`blockedNets`) covers private, loopback, link-local, shared (CGNAT), multicast and reserved IPv4 space, and the IPv6 equivalents plus NAT64, Teredo and 6to4. IPv4-mapped IPv6 addresses are checked as IPv4.
+  - Redirects: at most 3, and only to `http`/`https`. This applies to link previews, feeds and webhooks alike.
+  - Guarded clients ignore `HTTP_PROXY`/`HTTPS_PROXY`. Through a proxy, the dialed address is the proxy's, so the check would mean nothing.
+  - `checkURL` is kept as an early check with a readable error (for example when a webhook is added). It uses the same list.
+  - `CAL_ALLOW_PRIVATE_FEEDS` and `CAL_ALLOW_PRIVATE_WEBHOOKS` keep their meaning. When set, feeds or webhooks use a client with the same timeouts and redirect limit but no address check. Link previews have no opt-out, as before.
+- **Compatibility:**
+  - Webhooks now follow at most 3 redirects (was 10), never to blocked addresses.
+  - Link previews follow up to 3 redirects (was 2).
+  - URLs in the newly listed ranges, for example a Tailscale `100.x` address, now need the matching opt-out.
+  - With `CAL_ALLOW_PRIVATE_FEEDS` set, a feed that redirects within the private network now works. Before, the redirect check refused it.
+  - Operator-configured servers (CalDAV, CardDAV, Invidious) aren't affected.
+- **Upstreamable:** yes.
+- **Tests:** `outbound_test.go`:
+  - `TestIsBlockedIP`: a table of blocked and allowed addresses, including mapped and NAT64 forms.
+  - `TestOutboundClientRefusesBlockedDial`: the dial itself is refused, with no `checkURL` involved.
+  - `TestOutboundClientRefusesBlockedRedirect`: a POST redirected (307) from an allowed host to a blocked one never reaches the second server.
+  - `TestOutboundClientRedirectLimits`: the hop count and non-http schemes.
+  - `TestDeliverWebhookPrivateOptOut` and `TestFetchICSPrivateOptOutFollowsRedirect`: both opt-outs.

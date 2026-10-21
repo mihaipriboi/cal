@@ -83,13 +83,15 @@ export function safeHref(href: string): boolean {
   return isRelative(href) || /^(https?:\/\/|mailto:)/i.test(href.trim());
 }
 
-// /api/… paths resolve to the stored remote server + session on native builds.
+// /api/… paths resolve to the stored remote server + session on native builds
+// (cal:server is only set there); the web app authenticates by cookie.
 function resolveAsset(src: string): string {
   if (!src.startsWith("/api/")) return src;
   try {
     const server = localStorage.getItem("cal:server");
+    if (!server) return src;
     const session = localStorage.getItem("cal:session");
-    const base = server ? server + src : src;
+    const base = server + src;
     return session ? `${base}${src.includes("?") ? "&" : "?"}session=${encodeURIComponent(session)}` : base;
   } catch {
     return src;

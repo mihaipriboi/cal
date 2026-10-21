@@ -39,6 +39,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-020](#fc-020--push-subscriptions-scoped-to-their-owner) | API | Push subscribe/unsubscribe can't take over or delete another user's endpoint | yes |
 | [FC-021](#fc-021--no-property-injection-through-icalendar-urlimage) | ICS | CR/LF can't inject properties into `feed.ics` or CalDAV pushes | yes |
 | [FC-022](#fc-022--note-links-and-images-limited-to-safe-urls) | web | Markdown links only for http(s)/mailto/same-origin; no protocol-relative images | yes |
+| [FC-023](#fc-023--web-session-stays-in-the-httponly-cookie) | auth | Web client keeps no session token; `?session=` only authorizes GET/HEAD | yes |
 
 ## Details
 
@@ -300,3 +301,18 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** links with other schemes in notes now show as text.
 - **Upstreamable:** yes.
 - **Tests:** `lib/markdown.test.tsx` covers the allowed and rejected hrefs (including mixed case, leading space, `//` and `/\`), unsafe links rendered as text, and protocol-relative images not rendered.
+
+### FC-023 — Web session stays in the HttpOnly cookie
+
+- **Why:**
+  - The web app is authenticated by the `cal_session` HttpOnly cookie, but the API client also stored the session token from the login response in `localStorage` and appended it as `?session=` to file and image URLs. Script running in the page could read the token, and it reached access logs and browser history through those URLs.
+  - On the server, `?session=` authorized any request method, although it only exists for `<img src>` and file links in the native apps, which can't send headers.
+- **What changed:**
+  - `packages/api-client`: on a page served by the Cal server (not an app shell), the client keeps no token. `setSession` doesn't store it, a stale `cal:session` is removed on start, and `assetUrl` returns plain paths. App shells (Capacitor, Wails) keep the Bearer token and signed asset URLs as before.
+  - `lib/markdown.tsx`: `/api/…` image paths get the server and session only when a native server URL is set.
+  - `httpapi/server.go` `bearerOrQuery`: `?session=` is honoured only on GET/HEAD.
+- **Compatibility:** web sessions continue through the cookie, so there's no re-login. Native apps are unchanged: they use Bearer headers for API calls and `?session=` only for GETs.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `lib/remote.test.ts`: on a plain web page no token is stored and asset URLs are unsigned; in the Capacitor shell the token is stored and URLs are signed.
+  - `TestQuerySessionOnlyForReads`: GET with `?session=` → 200, PUT/POST with it → 401, Bearer POST works.

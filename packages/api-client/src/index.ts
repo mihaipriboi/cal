@@ -439,6 +439,9 @@ export class CalApi {
   // a server URL + Bearer session. Same-origin web uses neither.
   private server = "";
   private session = "";
+  // Same-origin web authenticates by the HttpOnly cookie alone; keeping the
+  // token in script-readable storage or in URLs would only expose it.
+  private cookieOnly = false;
 
   constructor(private readonly baseUrl = "/api") {
     try {
@@ -458,7 +461,9 @@ export class CalApi {
       const servedByServer = /^https?:$/.test(proto) && !appShell;
       this.server = servedByServer ? "" : (localStorage.getItem("cal:server") ?? "");
       if (servedByServer) localStorage.removeItem("cal:server");
-      this.session = localStorage.getItem("cal:session") ?? "";
+      this.cookieOnly = servedByServer;
+      if (servedByServer) localStorage.removeItem("cal:session");
+      else this.session = localStorage.getItem("cal:session") ?? "";
     } catch {
       // storage unavailable
     }
@@ -477,9 +482,9 @@ export class CalApi {
   }
 
   setSession(token: string) {
-    this.session = token;
+    this.session = this.cookieOnly ? "" : token;
     try {
-      if (token) localStorage.setItem("cal:session", token);
+      if (this.session) localStorage.setItem("cal:session", this.session);
       else localStorage.removeItem("cal:session");
     } catch { /* ignore */ }
   }

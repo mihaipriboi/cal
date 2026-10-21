@@ -671,12 +671,18 @@ func (s *Server) writeSessionCookie(c *gin.Context, value string, maxAge int) {
 	})
 }
 
+// bearerOrQuery reads the native apps' session: the Bearer header, or
+// ?session= on GET/HEAD only — that form exists for <img src> and file links,
+// which can't send headers, and never needs to authorize a write.
 func bearerOrQuery(c *gin.Context) string {
 	h := c.GetHeader("Authorization")
 	if strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
 	}
-	return strings.TrimSpace(c.Query("session"))
+	if m := c.Request.Method; m == http.MethodGet || m == http.MethodHead {
+		return strings.TrimSpace(c.Query("session"))
+	}
+	return ""
 }
 
 func currentUser(c *gin.Context) store.User {

@@ -45,6 +45,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-026](#fc-026--credential-key-outside-the-database-github-token-encrypted-and-write-only) | security | Encryption key moves to `DATA_DIR/secret.key`; GitHub token encrypted, write-only; tokens left out of exports/backups | yes |
 | [FC-027](#fc-027--closing-linked-github-issues-is-opt-in) | API | Completing a card closes its GitHub issue only if `githubCloseIssues` is on | yes |
 | [FC-028](#fc-028--one-token-per-capability) | auth | Separate tokens for MCP, email intake, ICS feed and widget | yes |
+| [FC-029](#fc-029--sessions-stored-as-hashes) | auth | Session tokens stored as SHA-256; session list shows hashes, not tokens | yes |
 
 ## Details
 
@@ -409,3 +410,19 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Tests:**
   - `TestTokensAreScoped`: the four tokens are distinct, and each one opens only its own endpoint (intake, feed, widget, MCP). Intake also works with a Bearer header, and rotation retires the old intake token.
   - `TestScopedTokenMigrationKeepsURLs`: on a database migrated to `10003` with an existing user, `10004` seeds `intake_token = api_token` and `feed_token = widget_token`.
+
+### FC-029 — Sessions stored as hashes
+
+- **Why:** sessions were stored as the raw token: the `sessions.id` UUID that clients send as cookie or Bearer. Anyone with read access to the database or a dump could sign in as any user. `GET /api/sessions` also returned those IDs, so the session list handed every one of the user's tokens to any script running in the page.
+- **What changed:**
+  - Migration `10005` changes `sessions.id` to `TEXT` and replaces each existing value with `encode(sha256(token), 'hex')` in place, so current logins stay valid.
+  - The store hashes the presented token everywhere (`sessionKey`): `CreateSession` returns the token and stores only its hash, and `UserBySession`, `TouchSession`, `DeleteSession` and `RevokeOtherSessions` hash their argument.
+  - `ListSessions` returns the hash as the session's public ID, and `RevokeSession` takes that ID. The hash can't be used to sign in.
+- **Compatibility:**
+  - Nobody is signed out by the upgrade.
+  - Session IDs in `/api/sessions` are now 64-character hex strings. The web UI only uses them as keys for revoking.
+  - Down migration: hashes can't be reversed, so it deletes all sessions and everyone signs in again.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestSessionsListedByHash`: the list doesn't contain the token, the current entry's ID is SHA-256(token), and revoking by that ID ends the session.
+  - `TestSessionHashMigrationKeepsLogins`: on a database at `10004` with an old-style session row, migrating stores the hash and the pre-upgrade token still signs in.

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -248,14 +249,22 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, string, er
 	return u, hash, err
 }
 
-func (s *Store) UserBySession(ctx context.Context, sessionID string) (User, error) {
+// sessionKey is how a session token is stored: its SHA-256, hex-encoded. The
+// token itself exists only on the client; the key doubles as the session's
+// public ID in ListSessions/RevokeSession.
+func sessionKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Store) UserBySession(ctx context.Context, token string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
 		SELECT users.id::text, users.email, users.is_admin, users.created_at
 		FROM sessions
 		JOIN users ON users.id = sessions.user_id
 		WHERE sessions.id = $1 AND sessions.expires_at > now()
-	`, sessionID).Scan(&u.ID, &u.Email, &u.IsAdmin, &u.CreatedAt)
+	`, sessionKey(token)).Scan(&u.ID, &u.Email, &u.IsAdmin, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -264,12 +273,12 @@ func (s *Store) UserBySession(ctx context.Context, sessionID string) (User, erro
 
 func (s *Store) CreateSession(ctx context.Context, userID, userAgent string) (string, error) {
 	_, _ = s.db.Exec(ctx, `DELETE FROM sessions WHERE expires_at < now()`)
-	id := uuid.NewString()
+	token := uuid.NewString()
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO sessions (id, user_id, expires_at, user_agent, last_seen_at)
 		VALUES ($1, $2, now() + interval '30 days', nullif($3, ''), now())
-	`, id, userID, userAgent)
-	return id, err
+	`, sessionKey(token), userID, userAgent)
+	return token, err
 }
 
 // SessionInfo describes one live session for the security panel.
@@ -281,14 +290,15 @@ type SessionInfo struct {
 	Current   bool       `json:"current"`
 }
 
-// ListSessions returns the user's live sessions; currentID marks "this one".
-func (s *Store) ListSessions(ctx context.Context, userID, currentID string) ([]SessionInfo, error) {
+// ListSessions returns the user's live sessions, identified by their stored
+// key (not the token); currentToken marks "this one".
+func (s *Store) ListSessions(ctx context.Context, userID, currentToken string) ([]SessionInfo, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, user_agent, created_at, last_seen_at, id::text = $2
+		SELECT id, user_agent, created_at, last_seen_at, id = $2
 		FROM sessions
 		WHERE user_id = $1 AND expires_at > now()
 		ORDER BY last_seen_at DESC NULLS LAST
-	`, userID, currentID)
+	`, userID, sessionKey(currentToken))
 	if err != nil {
 		return nil, err
 	}
@@ -305,11 +315,12 @@ func (s *Store) ListSessions(ctx context.Context, userID, currentID string) ([]S
 }
 
 // TouchSession refreshes last_seen_at (cheap activity signal).
-func (s *Store) TouchSession(ctx context.Context, sessionID string) {
-	_, _ = s.db.Exec(ctx, `UPDATE sessions SET last_seen_at = now() WHERE id = $1`, sessionID)
+func (s *Store) TouchSession(ctx context.Context, token string) {
+	_, _ = s.db.Exec(ctx, `UPDATE sessions SET last_seen_at = now() WHERE id = $1`, sessionKey(token))
 }
 
-// RevokeSession deletes one session owned by the user.
+// RevokeSession deletes one session owned by the user, by its public ID (the
+// stored key from ListSessions).
 func (s *Store) RevokeSession(ctx context.Context, userID, sessionID string) error {
 	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE id = $1 AND user_id = $2`, sessionID, userID)
 	return err
@@ -321,14 +332,16 @@ func (s *Store) ChangePassword(ctx context.Context, userID, newHash string) erro
 	return err
 }
 
-// RevokeOtherSessions deletes every session except the caller's.
-func (s *Store) RevokeOtherSessions(ctx context.Context, userID, keepID string) error {
-	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND id <> $2`, userID, keepID)
+// RevokeOtherSessions deletes every session except the one holding
+// keepToken ("" = revoke all).
+func (s *Store) RevokeOtherSessions(ctx context.Context, userID, keepToken string) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND id <> $2`, userID, sessionKey(keepToken))
 	return err
 }
 
-func (s *Store) DeleteSession(ctx context.Context, sessionID string) error {
-	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionID)
+// DeleteSession ends the session holding token (logout).
+func (s *Store) DeleteSession(ctx context.Context, token string) error {
+	_, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionKey(token))
 	return err
 }
 

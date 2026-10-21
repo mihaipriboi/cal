@@ -35,6 +35,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-016](#fc-016--deploy-compose-follows-latest) | deploy | `deploy/compose.yml` follows `latest`; updating is `docker compose pull && docker compose up -d` | no |
 | [FC-017](#fc-017--image-build-fetches-and-runs-less) | build | No embedded-Postgres download and no npm install scripts during the image build | yes |
 | [FC-018](#fc-018--mcp-card-tools-check-the-columns-board) | API | MCP `create_card`/`move_card` only accept a column of the card's board | yes |
+| [FC-019](#fc-019--github-sync-loop-reuses-one-ticker) | API | GitHub sync uses one ticker instead of one per iteration | yes |
 
 ## Details
 
@@ -257,3 +258,11 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** no change for valid calls.
 - **Upstreamable:** yes.
 - **Tests:** `TestMCPCardColumnMustBelongToBoard` (`mcp_cards_test.go`): cross-board create and move are refused, same-board ones work.
+
+### FC-019 — GitHub sync loop reuses one ticker
+
+- **Why:** `GitHubSyncLoop` created a new `time.Ticker` on every loop iteration. With Go 1.23+ (this module targets 1.26), unreferenced tickers are garbage-collected, so the practical cost was an allocation per wait. Under older toolchains, each one leaked.
+- **What changed:** `httpapi/github.go` creates one ticker before the loop and stops it on exit.
+- **Compatibility:** none.
+- **Upstreamable:** yes.
+- **Tests:** none specific. `go vet` and the existing suite pass.

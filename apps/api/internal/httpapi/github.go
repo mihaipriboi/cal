@@ -233,11 +233,13 @@ func GitHubSyncLoop(ctx context.Context, s *store.Store, every time.Duration) {
 		}
 	}
 	tick()
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.NewTicker(every).C:
+		case <-ticker.C:
 			tick()
 		}
 	}

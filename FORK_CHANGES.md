@@ -38,6 +38,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-019](#fc-019--github-sync-loop-reuses-one-ticker) | API | GitHub sync uses one ticker instead of one per iteration | yes |
 | [FC-020](#fc-020--push-subscriptions-scoped-to-their-owner) | API | Push subscribe/unsubscribe can't take over or delete another user's endpoint | yes |
 | [FC-021](#fc-021--no-property-injection-through-icalendar-urlimage) | ICS | CR/LF can't inject properties into `feed.ics` or CalDAV pushes | yes |
+| [FC-022](#fc-022--note-links-and-images-limited-to-safe-urls) | web | Markdown links only for http(s)/mailto/same-origin; no protocol-relative images | yes |
 
 ## Details
 
@@ -289,3 +290,13 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** normal URLs are unchanged. Long URLs are now folded per RFC 5545; parsers unfold them.
 - **Upstreamable:** yes.
 - **Tests:** `TestEncodeNoPropertyInjection`: CR, LF and CRLF in summary, description, URL and a long image URL produce no extra property lines and round-trip through `Parse`.
+
+### FC-022 — Note links and images limited to safe URLs
+
+- **Why:** the note renderer (`lib/markdown.tsx`) put any Markdown link target into `href`. `javascript:` is blocked by React 19 and the web CSP, but other schemes (`data:`, `intent:`, `vbscript:`) weren't filtered, and the Capacitor shell has no CSP. Images allowed any `src` starting with `/`, which includes protocol-relative `//host/…` and `/\host/…`, so they loaded from other hosts.
+- **What changed:** `lib/markdown.tsx`.
+  - New exported `safeHref`: only `http(s)://`, `mailto:` and same-origin paths become links. Anything else renders as plain text.
+  - "Same-origin" means a single leading `/`, not `//` or `/\`. Image sources use the same rule.
+- **Compatibility:** links with other schemes in notes now show as text.
+- **Upstreamable:** yes.
+- **Tests:** `lib/markdown.test.tsx` covers the allowed and rejected hrefs (including mixed case, leading space, `//` and `/\`), unsafe links rendered as text, and protocol-relative images not rendered.

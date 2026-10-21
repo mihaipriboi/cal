@@ -45,7 +45,7 @@ function inline(text: string, onWiki?: (title: string) => void): ReactNode[] {
       const alt = tok.slice(2, end);
       const src = tok.slice(end + 2, -1);
       // Only render same-origin uploads or http(s) — nothing else loads.
-      if (src.startsWith("/") || /^https?:\/\//i.test(src)) {
+      if (isRelative(src) || /^https?:\/\//i.test(src)) {
         out.push(<img key={k()} src={resolveAsset(src)} alt={alt} className="md-img" />);
       } else {
         out.push(alt);
@@ -55,9 +55,13 @@ function inline(text: string, onWiki?: (title: string) => void): ReactNode[] {
       const label = tok.slice(1, end);
       const href = tok.slice(end + 2, -1);
       out.push(
-        <a key={k()} href={href} target="_blank" rel="noreferrer">
-          {label}
-        </a>,
+        safeHref(href) ? (
+          <a key={k()} href={href} target="_blank" rel="noreferrer">
+            {label}
+          </a>
+        ) : (
+          label
+        ),
       );
     } else {
       out.push(<em key={k()}>{tok.slice(1, -1)}</em>);
@@ -66,6 +70,17 @@ function inline(text: string, onWiki?: (title: string) => void): ReactNode[] {
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
+}
+
+// A single leading "/" is same-origin; "//host" and "/\\host" are another host.
+function isRelative(url: string): boolean {
+  return /^\/(?![/\\])/.test(url);
+}
+
+// Links may be http(s), mailto or same-origin; anything else (javascript:,
+// data:, intent:, …) renders as plain text.
+export function safeHref(href: string): boolean {
+  return isRelative(href) || /^(https?:\/\/|mailto:)/i.test(href.trim());
 }
 
 // /api/… paths resolve to the stored remote server + session on native builds.

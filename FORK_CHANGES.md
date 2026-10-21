@@ -41,6 +41,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-022](#fc-022--note-links-and-images-limited-to-safe-urls) | web | Markdown links only for http(s)/mailto/same-origin; no protocol-relative images | yes |
 | [FC-023](#fc-023--web-session-stays-in-the-httponly-cookie) | auth | Web client keeps no session token; `?session=` only authorizes GET/HEAD | yes |
 | [FC-024](#fc-024--logout-clears-cached-personal-data) | web | Logout drops the entries snapshot and API cache; tokens never cached in localStorage | yes |
+| [FC-025](#fc-025--all-workflow-actions-pinned-by-commit) | CI | Every GitHub Action is pinned to a commit SHA | yes |
 
 ## Details
 
@@ -330,3 +331,12 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** after logout, an offline reload no longer shows the previous user's entries. The pending offline write queue (`cal:opq`) is left as is, so unsynced edits aren't discarded.
 - **Upstreamable:** yes.
 - **Tests:** `lib/offline.test.ts`: tokens never reach `cal:settings`; logout clears the user and entries, keeps the theme, and deletes the `cal-api` cache.
+
+### FC-025 — All workflow actions pinned by commit
+
+- **Why:** `ci.yml`, which runs on every push to `main` and on pull requests, and the manual release workflows referenced third-party actions by movable major tags (`@v7`). Whoever controls an action's repository can repoint such a tag. `fork-image.yml` was already pinned (FC-009).
+- **What changed:** every `uses:` in `ci.yml`, `android.yml`, `release.yml` and `auto-release.yml` is pinned to the commit its major tag pointed at on 2026-10-21, with the exact version in a comment. The commits match those already in `fork-image.yml` where the actions overlap.
+- **Compatibility:** none. Updating an action now means changing the SHA deliberately.
+- **Upstreamable:** yes.
+- **Tests:** `actionlint` v1.7.7 passes on all workflows. Each SHA was resolved with the GitHub API (`commits/<tag>`) and matched to its `vX.Y.Z` tag.
+- **Not changed:** `release.yml` still fetches AppImage tooling from moving `continuous` builds. That workflow is manual-only in the fork (FC-009) and isn't used to publish anything.

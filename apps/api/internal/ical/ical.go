@@ -440,11 +440,11 @@ func encodeVevent(e Event) string {
 	if e.Location != "" {
 		b.WriteString("LOCATION:" + fold(escapeText(e.Location)) + "\r\n")
 	}
-	if e.URL != "" {
-		b.WriteString("URL:" + e.URL + "\r\n")
+	if u := uriValue(e.URL); u != "" {
+		b.WriteString("URL:" + fold(u) + "\r\n")
 	}
-	if e.Image != "" {
-		b.WriteString("IMAGE;VALUE=URI:" + e.Image + "\r\n")
+	if u := uriValue(e.Image); u != "" {
+		b.WriteString("IMAGE;VALUE=URI:" + fold(u) + "\r\n")
 	}
 	if e.AllDay {
 		b.WriteString("DTSTART;VALUE=DATE:" + e.Start.Format("20060102") + "\r\n")
@@ -496,8 +496,19 @@ func encodeVevent(e Event) string {
 }
 
 func escapeText(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, "\n", `\n`, ",", `\,`, ";", `\;`)
+	r := strings.NewReplacer(`\`, `\\`, "\r\n", `\n`, "\r", `\n`, "\n", `\n`, ",", `\,`, ";", `\;`)
 	return r.Replace(s)
+}
+
+// uriValue drops control characters from a URI property value. URIs aren't
+// TEXT-escaped, so a CR or LF would otherwise start a new property line.
+func uriValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // fold wraps a content line at 75 octets per RFC 5545 (simplified to runes —

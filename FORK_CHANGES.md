@@ -37,6 +37,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-018](#fc-018--mcp-card-tools-check-the-columns-board) | API | MCP `create_card`/`move_card` only accept a column of the card's board | yes |
 | [FC-019](#fc-019--github-sync-loop-reuses-one-ticker) | API | GitHub sync uses one ticker instead of one per iteration | yes |
 | [FC-020](#fc-020--push-subscriptions-scoped-to-their-owner) | API | Push subscribe/unsubscribe can't take over or delete another user's endpoint | yes |
+| [FC-021](#fc-021--no-property-injection-through-icalendar-urlimage) | ICS | CR/LF can't inject properties into `feed.ics` or CalDAV pushes | yes |
 
 ## Details
 
@@ -278,3 +279,13 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** unchanged for single-user setups and for account switching in one browser. A foreign subscribe or unsubscribe of someone else's endpoint is now a silent no-op (still 204).
 - **Upstreamable:** yes.
 - **Tests:** `TestPushSubscriptionOwnership`: a foreign subscribe with different keys and a foreign unsubscribe leave the owner's row alone, the same keys move it, and the owner can unsubscribe.
+
+### FC-021 — No property injection through iCalendar URL/IMAGE
+
+- **Why:** the iCalendar encoder (used by `/api/feed.ics`, the shared people calendar and CalDAV push) wrote `URL:` and `IMAGE:` values verbatim. A CR/LF in an entry's link URL therefore started a new property line, so arbitrary properties could be injected into the feed or the pushed object. TEXT values escaped `\n` but passed a bare `\r` through.
+- **What changed:** `internal/ical/ical.go`.
+  - New `uriValue` drops ASCII control characters from URI values. `URL` and `IMAGE` use it, are folded like other long lines, and are omitted when empty.
+  - `escapeText` also turns `\r\n` and a bare `\r` into the escaped newline.
+- **Compatibility:** normal URLs are unchanged. Long URLs are now folded per RFC 5545; parsers unfold them.
+- **Upstreamable:** yes.
+- **Tests:** `TestEncodeNoPropertyInjection`: CR, LF and CRLF in summary, description, URL and a long image URL produce no extra property lines and round-trip through `Parse`.

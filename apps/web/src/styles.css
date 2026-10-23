@@ -255,6 +255,32 @@ button {
   font-weight: 600;
   color: var(--text-3);
 }
+/* A field label with a control on its right, e.g. Date + "No date". */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.field .inline-check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.input.input-placeholder {
+  text-align: left;
+  color: var(--text-3);
+  cursor: pointer;
+}
 
 .input, .select, .textarea {
   width: 100%;
@@ -1560,6 +1586,10 @@ button {
 .panel h3.overdue {
   color: var(--c-red);
 }
+.group-count {
+  margin-left: 4px;
+  opacity: 0.7;
+}
 .panel-empty {
   font-size: 13px;
   color: var(--text-3);
@@ -1700,6 +1730,34 @@ button {
 }
 .task-row.muted {
   opacity: 0.65;
+}
+/* Schedule button on undated tasks; negative margins keep the row height. */
+.task-row .icon-btn {
+  width: 26px;
+  height: 26px;
+  margin: -4px -6px;
+  color: var(--text-3);
+}
+.task-row .icon-btn.on {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+.task-row.scheduling {
+  flex-wrap: wrap;
+}
+.schedule-chips {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-left: 27px;
+}
+.schedule-chips .input {
+  width: auto;
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: 12px;
 }
 .tickbox {
   width: 17px;

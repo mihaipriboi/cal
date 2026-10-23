@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { addDays, formatTime, iso, timeToMinutes, todayIso } from "../lib/date";
+import { groupTasks } from "../lib/entries";
 import { moduleOn } from "../lib/modules";
 import { daysLabel, upcomingDates } from "../lib/people";
 import { fetchWeather, weatherIcon, type Weather } from "../lib/weather";
@@ -103,7 +104,7 @@ export function TodayPage() {
 
   // Deep-link landing: ensure entries exist even if the calendar never mounted.
   useEffect(() => {
-    void loadEntries({ from: addDaysIso(today, -14), to: addDaysIso(today, 14) });
+    void loadEntries({ from: addDaysIso(today, -14), to: addDaysIso(today, 14), undated: true });
     void loadFeeds();
     if (peopleOn) void loadPeople();
     void api.habits().then(setHabits).catch(reportErr("Could not load habits"));
@@ -146,6 +147,8 @@ export function TodayPage() {
     return s <= nowMinutes && nowMinutes < en;
   });
   const openTasks = untimedTasks.filter((e) => !e.completed);
+  const undatedTasks = useMemo(() => groupTasks(entries, today).noDate, [entries, today]);
+  const [showUndated, setShowUndated] = useState(false);
 
   // Birthdays/anniversaries coming up — workspace-scoped like the entries.
   const upcomingPeople = useMemo(() => {
@@ -445,6 +448,36 @@ export function TodayPage() {
                   </li>
                 ))}
               </ul>
+              {undatedTasks.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="group-toggle"
+                    style={{ marginTop: 12 }}
+                    aria-expanded={showUndated}
+                    onClick={() => setShowUndated((v) => !v)}
+                  >
+                    No date · {undatedTasks.length}
+                  </button>
+                  {showUndated && (
+                    <ul className="check-list">
+                      {undatedTasks.map((e) => (
+                        <li key={e.id}>
+                          <button
+                            type="button"
+                            className="tickbox"
+                            aria-label="Complete"
+                            onClick={() => void updateEntry(e.id, { completed: true })}
+                          />
+                          <button type="button" className="row-title" onClick={() => openEdit(e)}>
+                            {e.title}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
 
               {(notes.length > 0 || links.length > 0) && <h3 style={{ marginTop: 18 }}>Notes & links</h3>}
               <ul className="check-list">

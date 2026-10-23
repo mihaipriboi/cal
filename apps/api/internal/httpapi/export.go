@@ -191,7 +191,7 @@ func (s *Server) previewRestore(c *gin.Context, userID string, body exportPayloa
 
 	entryIDs := make([]string, 0, len(body.Entries))
 	for _, e := range body.Entries {
-		if e.ID != "" && e.Title != "" && e.Type != "" && e.Date != "" {
+		if e.ID != "" && e.Restorable() {
 			entryIDs = append(entryIDs, e.ID)
 		}
 	}
@@ -407,7 +407,8 @@ func (s *Server) exportICS(c *gin.Context) {
 	}
 	events := make([]ical.Event, 0, len(entries))
 	for _, e := range entries {
-		if e.Type == "note" || e.Type == "link" {
+		// Undated tasks have no day to place a VEVENT on.
+		if e.Type == "note" || e.Type == "link" || e.Date == "" {
 			continue
 		}
 		events = append(events, entryToEvent(e, loc))

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { formatDayShort, todayIso } from "../lib/date";
+import { compareDates } from "../lib/entries";
 import { reportErr, usePlanner } from "../stores/planner";
 import { useUi } from "../stores/ui";
 
@@ -229,7 +230,7 @@ export function BoardsPage() {
       {cardView === "list" ? (
         <div className="page-scroll" style={{ paddingTop: 0 }}>
           {columns.map((col) => {
-            const items = (byColumn.get(col.id) ?? []).sort((a, b) => a.date.localeCompare(b.date));
+            const items = (byColumn.get(col.id) ?? []).sort((a, b) => compareDates(a.date, b.date));
             return (
               <section key={col.id} className="panel" style={{ marginBottom: 10 }}>
                 <h3>
@@ -251,7 +252,7 @@ export function BoardsPage() {
                         {card.title}
                       </button>
                       {card.blockedBy && <span className="meta-chip overdue">blocked</span>}
-                      <span className="meta-chip">{formatDayShort(card.date)}</span>
+                      {card.date && <span className="meta-chip">{formatDayShort(card.date)}</span>}
                       {card.tags.map((t) => (
                         <span key={t} className="meta-chip">{t}</span>
                       ))}
@@ -381,7 +382,7 @@ export function BoardsPage() {
 }
 
 // CardDue — date chip on the card face; red when past due and not done.
-function CardDue({ date, done }: { date: string; done: boolean }) {
+function CardDue({ date, done }: { date?: string; done: boolean }) {
   if (!date) return null;
   const overdue = !done && date < todayIso();
   const today = date === todayIso();

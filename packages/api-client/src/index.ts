@@ -78,7 +78,8 @@ export interface Entry {
   content?: string;
   type: EntryType;
   linkUrl?: string;
-  date: string;
+  /** YYYY-MM-DD; absent only on undated tasks (no time, repeat or reminder). */
+  date?: string;
   /** HH:MM 24h; absent means all-day / untimed */
   startTime?: string;
   endTime?: string;
@@ -110,7 +111,8 @@ export interface EntryInput {
   content?: string;
   type: EntryType;
   linkUrl?: string;
-  date: string;
+  /** Omit for an undated task; required for every other type. */
+  date?: string;
   startTime?: string;
   endTime?: string;
   color?: string;
@@ -124,7 +126,10 @@ export interface EntryInput {
   blockedBy?: string;
 }
 
-export type EntryPatch = Partial<EntryInput & { completed: boolean; pinned: boolean; watched: boolean }>;
+/** `date: null` (or "") makes a task undated. */
+export type EntryPatch = Partial<Omit<EntryInput, "date"> & { completed: boolean; pinned: boolean; watched: boolean }> & {
+  date?: string | null;
+};
 
 export interface Revision {
   id: string;
@@ -132,7 +137,7 @@ export interface Revision {
   title: string;
   content: string;
   type: EntryType;
-  date: string;
+  date?: string;
   startTime?: string;
   endTime?: string;
   completed: boolean;
@@ -178,6 +183,10 @@ export interface Settings {
   invidiousUrl?: string;
   /** Public people-list share token ("" = sharing off). */
   peopleShareToken?: string;
+  /** Quick-added tasks with no day in the text get today instead of staying undated. */
+  quickAddToday?: boolean;
+  /** Tasks page lists the No date group first instead of last. */
+  undatedFirst?: boolean;
 }
 
 /** One YouTube search hit from the user's Invidious instance. */
@@ -612,12 +621,14 @@ export class CalApi {
     return this.request<ShoppingSuggestion[]>(`/shopping/suggest?q=${encodeURIComponent(q)}`);
   }
 
-  async entries(params: { from?: string; to?: string; q?: string; workspace?: string } = {}): Promise<Entry[]> {
+  /** `undated` adds undated tasks to a ranged query (an unranged one has them already). */
+  async entries(params: { from?: string; to?: string; q?: string; workspace?: string; undated?: boolean } = {}): Promise<Entry[]> {
     const search = new URLSearchParams();
     if (params.from) search.set("from", params.from);
     if (params.to) search.set("to", params.to);
     if (params.q) search.set("q", params.q);
     if (params.workspace) search.set("workspace", params.workspace);
+    if (params.undated) search.set("undated", "1");
     const suffix = search.size ? `?${search.toString()}` : "";
     return this.request<Entry[]>(`/entries${suffix}`);
   }

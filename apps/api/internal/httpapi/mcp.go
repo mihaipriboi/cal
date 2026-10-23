@@ -42,13 +42,14 @@ func toolText(text string, isErr bool) gin.H {
 var mcpTools = []gin.H{
 	{
 		"name":        "list_entries",
-		"description": "List planner entries (tasks, notes, links, events) in a date range or by search query.",
+		"description": "List planner entries (tasks, notes, links, events) in a date range or by search query. Without a range, undated tasks are included (they have no date field).",
 		"inputSchema": gin.H{
 			"type": "object",
 			"properties": gin.H{
-				"from": gin.H{"type": "string", "description": "Start date YYYY-MM-DD (optional)"},
-				"to":   gin.H{"type": "string", "description": "End date YYYY-MM-DD (optional)"},
-				"q":    gin.H{"type": "string", "description": "Search query (optional)"},
+				"from":    gin.H{"type": "string", "description": "Start date YYYY-MM-DD (optional)"},
+				"to":      gin.H{"type": "string", "description": "End date YYYY-MM-DD (optional)"},
+				"q":       gin.H{"type": "string", "description": "Search query (optional)"},
+				"undated": gin.H{"type": "boolean", "description": "Also include undated tasks when a range is given (optional)"},
 			},
 		},
 	},
@@ -59,7 +60,7 @@ var mcpTools = []gin.H{
 	},
 	{
 		"name":        "create_entry",
-		"description": "Create a task, note, link or event. Times are HH:MM, date is YYYY-MM-DD. Recur: none|daily|weekly|monthly|yearly (tasks only). remind: minutes before start.",
+		"description": "Create a task, note, link or event. Times are HH:MM, date is YYYY-MM-DD. The date is required except for tasks: a task without one is undated and can't have times, recur or remind. Recur: none|daily|weekly|monthly|yearly (tasks only). remind: minutes before start.",
 		"inputSchema": gin.H{
 			"type": "object",
 			"properties": gin.H{
@@ -75,7 +76,7 @@ var mcpTools = []gin.H{
 				"recur":     gin.H{"type": "string", "enum": []string{"none", "daily", "weekly", "monthly", "yearly"}},
 				"remind":    gin.H{"type": "integer", "description": "minutes before start to remind"},
 			},
-			"required": []string{"title", "type", "date"},
+			"required": []string{"title", "type"},
 		},
 	},
 	{
@@ -86,7 +87,7 @@ var mcpTools = []gin.H{
 			"properties": gin.H{
 				"id":        gin.H{"type": "string"},
 				"title":     gin.H{"type": "string"},
-				"date":      gin.H{"type": "string"},
+				"date":      gin.H{"type": "string", "description": "YYYY-MM-DD; \"\" (or null) makes a task undated"},
 				"startTime": gin.H{"type": "string"},
 				"endTime":   gin.H{"type": "string"},
 				"completed": gin.H{"type": "boolean"},
@@ -577,16 +578,17 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 	switch params.Name {
 	case "list_entries", "today":
 		var args struct {
-			From string `json:"from"`
-			To   string `json:"to"`
-			Q    string `json:"q"`
+			From    string `json:"from"`
+			To      string `json:"to"`
+			Q       string `json:"q"`
+			Undated bool   `json:"undated"`
 		}
 		_ = json.Unmarshal(params.Arguments, &args)
 		if params.Name == "today" {
 			today := time.Now().Format(time.DateOnly)
-			args.From, args.To = today, today
+			args.From, args.To, args.Undated = today, today, false
 		}
-		entries, err := s.store.ListEntries(ctx, user.ID, args.From, args.To, args.Q)
+		entries, err := s.store.ListEntriesScoped(ctx, user.ID, args.From, args.To, args.Q, "", args.Undated)
 		if err != nil {
 			fail("query failed")
 			return
@@ -636,6 +638,9 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 		}
 		if _, ok := raw["tags"]; ok {
 			entryPatch.HasTags = true
+		}
+		if d, ok := raw["date"]; ok && (string(d) == "null" || string(d) == `""`) {
+			entryPatch.Date, entryPatch.ClearDate = nil, true
 		}
 		updated, err := s.store.UpdateEntry(ctx, user.ID, id, entryPatch)
 		if errors.Is(err, store.ErrNotFound) {
@@ -1284,14 +1289,14 @@ func validateEntryInput(input *store.EntryInput) error {
 	default:
 		return errors.New("type must be task, note, link or event")
 	}
-	if input.Date == "" {
-		return errors.New("date is required")
-	}
 	if input.Recur == "" {
 		input.Recur = "none"
 	}
 	if input.Recur != "none" && input.Type != "task" {
 		return errors.New("only tasks can recur")
+	}
+	if input.Date == "" && !input.CanBeUndated() {
+		return errors.New("date is required, except for tasks with no times, recur or remind")
 	}
 	return nil
 }

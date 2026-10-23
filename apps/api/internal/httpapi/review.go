@@ -120,7 +120,7 @@ func (s *Server) habitStreakList(ctx context.Context, userID string) ([]habit, e
 	type key struct{ title, recur string }
 	done := map[key]map[string]bool{}
 	for _, e := range entries {
-		if e.Type != "task" || !e.Completed {
+		if e.Type != "task" || !e.Completed || e.Date == "" {
 			continue
 		}
 		k := key{e.Title, e.Recur}

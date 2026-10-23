@@ -1,10 +1,10 @@
 import type { SavedFilter } from "@cal/api-client";
-import { Bookmark, Check, CheckSquare, Plus, Save, Square, Trash2 } from "lucide-react";
+import { Bookmark, CalendarPlus, Check, CheckSquare, Plus, Save, Square, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { allTags, groupTasks } from "../lib/entries";
 import { parseQuickAdd } from "../lib/quickadd";
-import { formatDayShort, todayIso } from "../lib/date";
+import { addDays, formatDayShort, fromIso, iso, startOfWeek, todayIso } from "../lib/date";
 import { reportErr, usePlanner } from "../stores/planner";
 import { useUi } from "../stores/ui";
 import type { Entry } from "@cal/api-client";
@@ -24,8 +24,18 @@ function TaskRow({
 }) {
   const openEdit = useUi((state) => state.openEdit);
   const updateEntry = usePlanner((state) => state.updateEntry);
+  const weekStart = usePlanner((state) => state.settings.weekStart);
+  const [scheduling, setScheduling] = useState(false);
+  const canSchedule = !entry.date && !entry.completed && !selecting;
+
+  function schedule(date: string) {
+    setScheduling(false);
+    if (date) void updateEntry(entry.id, { date });
+  }
+
+  const today = fromIso(todayIso());
   return (
-    <li className={`task-row ${entry.completed ? "done" : ""} ${muted ? "muted" : ""}`}>
+    <li className={`task-row ${entry.completed ? "done" : ""} ${muted ? "muted" : ""} ${scheduling ? "scheduling" : ""}`}>
       {selecting ? (
         <button
           type="button"
@@ -54,7 +64,33 @@ function TaskRow({
         </span>
       ))}
       {entry.recur !== "none" && <span className="meta-chip">{entry.recur}</span>}
-      <span className="meta-chip date">{formatDayShort(entry.date)}</span>
+      {entry.date && <span className="meta-chip date">{formatDayShort(entry.date)}</span>}
+      {canSchedule && (
+        <button
+          type="button"
+          className={`icon-btn ${scheduling ? "on" : ""}`}
+          aria-label="Schedule"
+          aria-expanded={scheduling}
+          title="Schedule"
+          onClick={() => setScheduling((v) => !v)}
+        >
+          <CalendarPlus size={14} />
+        </button>
+      )}
+      {scheduling && (
+        <div className="schedule-chips">
+          <button type="button" className="tag-chip" onClick={() => schedule(iso(today))}>
+            Today
+          </button>
+          <button type="button" className="tag-chip" onClick={() => schedule(iso(addDays(today, 1)))}>
+            Tomorrow
+          </button>
+          <button type="button" className="tag-chip" onClick={() => schedule(iso(startOfWeek(addDays(today, 7), weekStart)))}>
+            Next week
+          </button>
+          <input className="input" type="date" aria-label="Pick a date" onChange={(e) => schedule(e.target.value)} />
+        </div>
+      )}
     </li>
   );
 }
@@ -73,6 +109,8 @@ export function TasksPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
   const api = usePlanner((state) => state.api);
+  const quickAddToday = usePlanner((state) => state.settings.quickAddToday ?? false);
+  const undatedFirst = usePlanner((state) => state.settings.undatedFirst ?? false);
   const today = todayIso();
 
   // The task list needs every entry, not just the visible calendar range.
@@ -116,7 +154,8 @@ export function TasksPage() {
     await createEntry({
       title: parsed.title,
       type: "task",
-      date: parsed.date,
+      // No day in the text: undated, unless the setting says today.
+      date: parsed.date ?? (quickAddToday ? today : undefined),
       startTime: parsed.startTime,
       tags: [...parsed.tags, ...(tag ? [tag] : [])],
     });
@@ -146,10 +185,22 @@ export function TasksPage() {
   }
 
   const rowProps = { selecting, onSelect: toggleSelect };
+  const noDateGroup = groups.noDate.length > 0 && (
+    <section className="panel">
+      <h3>
+        No date <span className="group-count">{groups.noDate.length}</span>
+      </h3>
+      <ul className="task-list">
+        {groups.noDate.map((e) => (
+          <TaskRow key={e.id} entry={e} selected={selected.has(e.id)} {...rowProps} />
+        ))}
+      </ul>
+    </section>
+  );
 
   return (
     <>
-      <PageHeader title="Tasks" sub={`${groups.overdue.length + groups.today.length + groups.upcoming.length} open`}>
+      <PageHeader title="Tasks" sub={`${groups.overdue.length + groups.today.length + groups.upcoming.length + groups.noDate.length} open`}>
         <button
           type="button"
           className={`btn btn-secondary btn-xs ${selecting ? "on" : ""}`}
@@ -223,6 +274,7 @@ export function TasksPage() {
         )}
 
         <div className="task-groups">
+          {undatedFirst && noDateGroup}
           {groups.overdue.length > 0 && (
             <section className="panel">
               <h3 className="overdue">Overdue</h3>
@@ -252,6 +304,7 @@ export function TasksPage() {
               </ul>
             </section>
           )}
+          {!undatedFirst && noDateGroup}
           {groups.done.length > 0 && (
             <section className="panel">
               <button type="button" className="group-toggle" onClick={() => setShowDone(!showDone)}>

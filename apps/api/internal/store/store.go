@@ -33,7 +33,7 @@ type User struct {
 
 // entryCols is the canonical SELECT/RETURNING column list for entries.
 // Times are rendered as HH:MM strings to keep the API surface simple.
-const entryCols = `id::text, title, content, type, link_url, date::text,
+const entryCols = `id::text, title, content, type, link_url, coalesce(date::text, ''),
 	to_char(start_time, 'HH24:MI'), to_char(end_time, 'HH24:MI'),
 	completed, color, tags, recur, remind, pinned,
 	watched, link_image, link_desc, link_favicon, link_video_id,
@@ -47,7 +47,7 @@ type Entry struct {
 	Content      string    `json:"content,omitempty"`
 	Type         string    `json:"type"`
 	LinkURL      string    `json:"linkUrl,omitempty"`
-	Date         string    `json:"date"`
+	Date         string    `json:"date,omitempty"` // "" = undated task
 	StartTime    *string   `json:"startTime,omitempty"`
 	EndTime      *string   `json:"endTime,omitempty"`
 	Completed    bool      `json:"completed"`
@@ -75,6 +75,19 @@ type Entry struct {
 	BlockedBy    *string   `json:"blockedBy,omitempty"`
 	// LinkMetaAt — set once enrichment (unfurl/oEmbed) has run; NULL = pending.
 	LinkMetaAt *time.Time `json:"linkMetaAt,omitempty"`
+}
+
+// canBeUndated reports whether the entry may go without a date: only tasks
+// with no time, repeat or reminder, since those all need a day to anchor to.
+func (e Entry) canBeUndated() bool {
+	return e.Type == "task" && strOrEmpty(e.StartTime) == "" && strOrEmpty(e.EndTime) == "" &&
+		(e.Recur == "" || e.Recur == "none") && e.Remind == nil
+}
+
+// Restorable reports whether an exported entry can be restored: it needs a
+// title, a type and a date, except tasks, which may be undated.
+func (e Entry) Restorable() bool {
+	return e.Title != "" && e.Type != "" && (e.Date != "" || e.Type == "task")
 }
 
 func (e *Entry) scan(row interface{ Scan(...any) error }) error {
@@ -121,6 +134,11 @@ type Settings struct {
 	InvidiousURL string `json:"invidiousUrl"`
 	// PeopleShareToken exposes the public birthday/date list when set.
 	PeopleShareToken string `json:"peopleShareToken"`
+	// QuickAddToday dates quick-added tasks today when the text names no
+	// day; by default they stay undated.
+	QuickAddToday bool `json:"quickAddToday"`
+	// UndatedFirst lists the Tasks page's No date group first, not last.
+	UndatedFirst bool `json:"undatedFirst"`
 }
 
 type Feed struct {
@@ -137,7 +155,7 @@ type EntryInput struct {
 	Content     string   `json:"content"`
 	Type        string   `json:"type"`
 	LinkURL     string   `json:"linkUrl"`
-	Date        string   `json:"date"`
+	Date        string   `json:"date"` // "" = undated (tasks only)
 	StartTime   string   `json:"startTime"`
 	EndTime     string   `json:"endTime"`
 	Color       string   `json:"color"`
@@ -152,12 +170,20 @@ type EntryInput struct {
 	BlockedBy   *string  `json:"blockedBy"`
 }
 
+// CanBeUndated reports whether the input may go without a date (see
+// Entry.canBeUndated).
+func (in EntryInput) CanBeUndated() bool {
+	return in.Type == "task" && in.StartTime == "" && in.EndTime == "" &&
+		(in.Recur == "" || in.Recur == "none") && in.Remind == nil
+}
+
 type EntryPatch struct {
 	Title      *string  `json:"title"`
 	Content    *string  `json:"content"`
 	Type       *string  `json:"type"`
 	LinkURL    *string  `json:"linkUrl"`
 	Date       *string  `json:"date"`
+	ClearDate  bool     `json:"-"` // make the task undated
 	StartTime  *string  `json:"startTime"`
 	EndTime    *string  `json:"endTime"`
 	Completed  *bool    `json:"completed"`
@@ -174,6 +200,8 @@ type EntryPatch struct {
 	// WorkspaceID/BlockedBy: nil = leave; "" = clear; uuid = set.
 	WorkspaceID *string `json:"workspaceId"`
 	BlockedBy   *string `json:"blockedBy"`
+	// ClearRemind removes the reminder (remind: null).
+	ClearRemind bool `json:"-"`
 }
 
 func New(db *pgxpool.Pool) *Store {
@@ -420,7 +448,7 @@ func (s *Store) CreateEntry(ctx context.Context, userID string, input EntryInput
 	var e Entry
 	err := e.scan(s.db.QueryRow(ctx, `
 		INSERT INTO entries (user_id, title, content, type, link_url, date, start_time, end_time, color, tags, recur, remind, account_id, board_id, column_id, position, dirty, workspace_id, blocked_by)
-		VALUES ($1, $2, $3, $4, $5, $6, nullif($7, '')::time, nullif($8, '')::time, $9, $10, coalesce(nullif($11, ''), 'none'), $12, $13::uuid, $14::uuid, $15::uuid, $16, $13 IS NOT NULL, nullif($17, '')::uuid, nullif($18, '')::uuid)
+		VALUES ($1, $2, $3, $4, $5, nullif($6, '')::date, nullif($7, '')::time, nullif($8, '')::time, $9, $10, coalesce(nullif($11, ''), 'none'), $12, $13::uuid, $14::uuid, $15::uuid, $16, $13 IS NOT NULL, nullif($17, '')::uuid, nullif($18, '')::uuid)
 		RETURNING `+entryCols+`
 	`, userID, input.Title, input.Content, input.Type, input.LinkURL, input.Date, input.StartTime, input.EndTime, input.Color, input.Tags, input.Recur, input.Remind, input.AccountID, input.BoardID, input.ColumnID, input.Position, input.WorkspaceID, input.BlockedBy))
 	return e, err
@@ -451,6 +479,9 @@ func (s *Store) UpdateEntry(ctx context.Context, userID, id string, patch EntryP
 	}
 	if patch.Date != nil {
 		current.Date = *patch.Date
+	}
+	if patch.ClearDate {
+		current.Date = ""
 	}
 	if patch.StartTime != nil {
 		current.StartTime = patch.StartTime
@@ -487,6 +518,9 @@ func (s *Store) UpdateEntry(ctx context.Context, userID, id string, patch EntryP
 	if patch.Remind != nil {
 		current.Remind = patch.Remind
 	}
+	if patch.ClearRemind {
+		current.Remind = nil
+	}
 	if patch.HasTags {
 		current.Tags = patch.Tags
 	}
@@ -512,10 +546,16 @@ func (s *Store) UpdateEntry(ctx context.Context, userID, id string, patch EntryP
 	if current.Type != "task" && current.Recur != "none" {
 		return Entry{}, ErrInvalid
 	}
-	if current.StartTime == nil && current.EndTime != nil {
+	// "" clears a time (stored as NULL), so it counts as unset here.
+	start, end := strOrEmpty(current.StartTime), strOrEmpty(current.EndTime)
+	if start == "" && end != "" {
 		return Entry{}, ErrInvalid
 	}
-	if current.StartTime != nil && current.EndTime != nil && *current.EndTime <= *current.StartTime {
+	if start != "" && end != "" && end <= start {
+		return Entry{}, ErrInvalid
+	}
+	// Calendar sync (account_id) needs a date to push.
+	if current.Date == "" && (!current.canBeUndated() || current.AccountID != nil) {
 		return Entry{}, ErrInvalid
 	}
 
@@ -529,12 +569,12 @@ func (s *Store) UpdateEntry(ctx context.Context, userID, id string, patch EntryP
 	}
 
 	// Rescheduling clears the reminder so it can fire again.
-	resetRemind := patch.Remind != nil || patch.StartTime != nil || patch.Date != nil
+	resetRemind := patch.Remind != nil || patch.ClearRemind || patch.StartTime != nil || patch.Date != nil || patch.ClearDate
 
 	var e Entry
 	err = e.scan(tx.QueryRow(ctx, `
 		UPDATE entries
-		SET title = $1, content = $2, type = $3, link_url = $4, date = $5,
+		SET title = $1, content = $2, type = $3, link_url = $4, date = nullif($5, '')::date,
 		    start_time = nullif($6, '')::time, end_time = nullif($7, '')::time,
 		    completed = $8, color = $9, tags = $10, recur = $11, remind = $12,
 		    pinned = $16, board_id = $17::uuid, column_id = $18::uuid, watched = $19,
@@ -648,12 +688,16 @@ func (s *Store) RestoreEntries(ctx context.Context, userID string, entries []Ent
 	defer tx.Rollback(ctx)
 	imported := 0
 	for _, e := range entries {
-		if e.Title == "" || e.Type == "" || e.Date == "" {
+		if !e.Restorable() {
 			continue
+		}
+		if e.Date == "" {
+			// Nothing to anchor a time, repeat or reminder to.
+			e.StartTime, e.EndTime, e.Recur, e.Remind = nil, nil, "none", nil
 		}
 		tag, err := tx.Exec(ctx, `
 			INSERT INTO entries (id, user_id, title, content, type, link_url, date, start_time, end_time, completed, color, tags, recur, remind)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, nullif($8, '')::time, nullif($9, '')::time, $10, $11, coalesce($12::text[], '{}'::text[]), coalesce(nullif($13, ''), 'none'), $14)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, nullif($7, '')::date, nullif($8, '')::time, nullif($9, '')::time, $10, $11, coalesce($12::text[], '{}'::text[]), coalesce(nullif($13, ''), 'none'), $14)
 			ON CONFLICT (id) DO NOTHING
 		`, e.ID, userID, e.Title, e.Content, e.Type, e.LinkURL, e.Date, strOr(e.StartTime), strOr(e.EndTime), e.Completed, e.Color, e.Tags, e.Recur, e.Remind)
 		if err != nil {
@@ -678,7 +722,7 @@ type Revision struct {
 	Title     string    `json:"title"`
 	Content   string    `json:"content"`
 	Type      string    `json:"type"`
-	Date      string    `json:"date"`
+	Date      string    `json:"date,omitempty"`
 	StartTime *string   `json:"startTime,omitempty"`
 	EndTime   *string   `json:"endTime,omitempty"`
 	Completed bool      `json:"completed"`
@@ -692,7 +736,7 @@ type Revision struct {
 // EntryRevisions lists snapshots for an entry, newest first (capped at 50).
 func (s *Store) EntryRevisions(ctx context.Context, userID, entryID string) ([]Revision, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, entry_id::text, title, coalesce(content, ''), type, date::text,
+		SELECT id::text, entry_id::text, title, coalesce(content, ''), type, coalesce(date::text, ''),
 		       to_char(start_time, 'HH24:MI'), to_char(end_time, 'HH24:MI'),
 		       completed, color, tags, recur, remind, saved_at
 		FROM entry_revisions
@@ -820,16 +864,18 @@ func (s *Store) Settings(ctx context.Context, userID string) (Settings, error) {
 		SELECT country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
 		       coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
 		       modules, active_workspace::text, default_view, nameday_country, invidious_url,
-		       coalesce(people_share_token, ''), github_close_issues, intake_token, feed_token FROM settings WHERE user_id = $1
-	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken, &settings.GithubCloseIssues, &settings.IntakeToken, &settings.FeedToken)
+		       coalesce(people_share_token, ''), github_close_issues, intake_token, feed_token,
+		       quick_add_today, undated_first FROM settings WHERE user_id = $1
+	`, userID).Scan(&settings.Country, &settings.ShowHolidays, &settings.Theme, &settings.WeekStart, &settings.Accent, &settings.Timezone, &settings.City, &settings.QuotaMB, &settings.DigestTime, &settings.WidgetToken, &settings.ApiToken, &settings.DefaultRate, &settings.GithubConnected, &settings.Modules, &settings.ActiveWorkspace, &settings.DefaultView, &settings.NamedayCountry, &settings.InvidiousURL, &settings.PeopleShareToken, &settings.GithubCloseIssues, &settings.IntakeToken, &settings.FeedToken,
+		&settings.QuickAddToday, &settings.UndatedFirst)
 	return settings, err
 }
 
 func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Settings) (Settings, error) {
 	var out Settings
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, modules, active_workspace, default_view, nameday_country, invidious_url, github_close_issues)
-		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, coalesce($11::jsonb, '{}'::jsonb), $12::uuid, coalesce(nullif($13, ''), 'month'), $14, $15, $16)
+		INSERT INTO settings (user_id, country, show_holidays, theme, week_start, accent, timezone, city, digest_time, default_rate, modules, active_workspace, default_view, nameday_country, invidious_url, github_close_issues, quick_add_today, undated_first)
+		VALUES ($1, $2, $3, $4, $5, $6, coalesce(nullif($7, ''), 'UTC'), nullif($8, ''), nullif($9, '')::time, $10, coalesce($11::jsonb, '{}'::jsonb), $12::uuid, coalesce(nullif($13, ''), 'month'), $14, $15, $16, $17, $18)
 		ON CONFLICT (user_id) DO UPDATE
 		SET country = EXCLUDED.country,
 		    show_holidays = EXCLUDED.show_holidays,
@@ -845,13 +891,15 @@ func (s *Store) UpdateSettings(ctx context.Context, userID string, settings Sett
 		    default_view = coalesce(EXCLUDED.default_view, 'month'),
 		    nameday_country = EXCLUDED.nameday_country,
 		    invidious_url = EXCLUDED.invidious_url,
-		    github_close_issues = EXCLUDED.github_close_issues
+		    github_close_issues = EXCLUDED.github_close_issues,
+		    quick_add_today = EXCLUDED.quick_add_today,
+		    undated_first = EXCLUDED.undated_first
 		RETURNING country, show_holidays, theme, week_start, accent, timezone, coalesce(city, ''), quota_mb,
 		          coalesce(to_char(digest_time,'HH24:MI'), ''), widget_token, api_token, default_rate, github_token_enc IS NOT NULL,
 		          modules, active_workspace::text, default_view, nameday_country, invidious_url, github_close_issues,
-		          intake_token, feed_token
-	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL, settings.GithubCloseIssues).
-		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL, &out.GithubCloseIssues, &out.IntakeToken, &out.FeedToken)
+		          intake_token, feed_token, quick_add_today, undated_first
+	`, userID, settings.Country, settings.ShowHolidays, settings.Theme, settings.WeekStart, settings.Accent, settings.Timezone, settings.City, settings.DigestTime, settings.DefaultRate, settings.Modules, settings.ActiveWorkspace, settings.DefaultView, settings.NamedayCountry, settings.InvidiousURL, settings.GithubCloseIssues, settings.QuickAddToday, settings.UndatedFirst).
+		Scan(&out.Country, &out.ShowHolidays, &out.Theme, &out.WeekStart, &out.Accent, &out.Timezone, &out.City, &out.QuotaMB, &out.DigestTime, &out.WidgetToken, &out.ApiToken, &out.DefaultRate, &out.GithubConnected, &out.Modules, &out.ActiveWorkspace, &out.DefaultView, &out.NamedayCountry, &out.InvidiousURL, &out.GithubCloseIssues, &out.IntakeToken, &out.FeedToken, &out.QuickAddToday, &out.UndatedFirst)
 	return out, err
 }
 
@@ -959,7 +1007,7 @@ func (s *Store) PushSubs(ctx context.Context, userID string) ([]PushSubscription
 // been pushed yet. Entry.OwnerID carries the owning user.
 func (s *Store) DueReminders(ctx context.Context) ([]Entry, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT e.id::text, e.title, e.content, e.type, e.link_url, e.date::text,
+		SELECT e.id::text, e.title, e.content, e.type, e.link_url, coalesce(e.date::text, ''),
 		       to_char(e.start_time, 'HH24:MI'), to_char(e.end_time, 'HH24:MI'),
 		       e.completed, e.color, e.tags, e.recur, e.remind, e.pinned,
 		       e.watched, e.link_image, e.link_desc, e.link_favicon, e.link_video_id,
@@ -2066,7 +2114,7 @@ func (s *Store) SharedBoard(ctx context.Context, token string) (map[string]any, 
 	}
 	colRows.Close()
 	cardRows, err := s.db.Query(ctx, `
-		SELECT id::text, column_id::text, title, completed, date::text, tags FROM entries
+		SELECT id::text, column_id::text, title, completed, coalesce(date::text, ''), tags FROM entries
 		WHERE board_id = $1 AND deleted_at IS NULL ORDER BY position NULLS LAST`, boardID)
 	if err != nil {
 		return nil, err
@@ -2227,7 +2275,7 @@ func (s *Store) GlobalSearch(ctx context.Context, userID, q string) ([]Entry, er
 		SELECT `+entryCols+` FROM entries
 		WHERE user_id = $1 AND deleted_at IS NULL
 		  AND (title ILIKE $2 OR content ILIKE $2 OR link_url ILIKE $2 OR $3 = ANY(tags))
-		ORDER BY date DESC LIMIT 60`, userID, "%"+q+"%", q)
+		ORDER BY date DESC NULLS LAST LIMIT 60`, userID, "%"+q+"%", q)
 	if err != nil {
 		return nil, err
 	}

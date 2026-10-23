@@ -59,7 +59,8 @@ accounts on someone else's server — one container and it's yours.
 ## Features
 
 - **Planner core** — month, week and day views with drag-and-drop, recurring
-  tasks, natural-language quick add (`dentist fri 5pm #health`), reminders,
+  tasks, tasks without a date (a "No date" list, like an inbox),
+  natural-language quick add (`dentist fri 5pm #health`), reminders,
   per-entry version history, soft-delete trash
 - **Beyond the calendar** — notes with templates and `[[wikilinks]]`, a link
   library that unfurls titles/thumbnails and searches YouTube via your own

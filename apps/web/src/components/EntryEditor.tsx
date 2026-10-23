@@ -3,6 +3,7 @@ import { renderMarkdown } from "../lib/markdown";
 import { AnimatePresence, motion } from "framer-motion";
 import { CalendarClock, Check, History, Link2, ListOrdered, Paperclip, Pin, RefreshCw, StickyNote, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { todayIso } from "../lib/date";
 import { reportErr, usePlanner } from "../stores/planner";
 import { useUi } from "../stores/ui";
 
@@ -62,7 +63,10 @@ export function EntryEditor() {
 
   const [title, setTitle] = useState("");
   const [type, setType] = useState<EntryType>("task");
+  // "" = no date, allowed only for tasks.
   const [date, setDate] = useState("");
+  // The date before "No date" was ticked, restored when it's unticked.
+  const [lastDate, setLastDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [recur, setRecur] = useState<Recur>("none");
@@ -108,6 +112,7 @@ export function EntryEditor() {
       setTitle(p.title ?? "");
       setType((p.type as typeof type) ?? "task");
       setDate(editor.date);
+      setLastDate("");
       setStartTime(editor.startTime ?? "");
       setEndTime(editor.startTime ? addHour(editor.startTime) : "");
       setRecur("none");
@@ -126,7 +131,8 @@ export function EntryEditor() {
       const e = editor.entry;
       setTitle(e.title);
       setType(e.type);
-      setDate(e.date);
+      setDate(e.date ?? "");
+      setLastDate("");
       setStartTime(e.startTime ?? "");
       setEndTime(e.endTime ?? "");
       setRecur(e.recur);
@@ -189,13 +195,39 @@ export function EntryEditor() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  const undated = type === "task" && !date;
+
+  // A task without a date can't keep a time, repeat or reminder: ask before
+  // dropping them.
+  function setNoDate(on: boolean) {
+    if (!on) {
+      setDate(lastDate || (editor.mode === "create" ? editor.date : "") || todayIso());
+      return;
+    }
+    if ((startTime || endTime || recur !== "none") && !window.confirm("Remove the time, repeat and reminder and make this task undated?")) {
+      return;
+    }
+    setLastDate(date);
+    setDate("");
+    setStartTime("");
+    setEndTime("");
+    setRecur("none");
+    setRemind("");
+  }
+
+  function chooseType(value: EntryType) {
+    setType(value);
+    // Only tasks can go without a date.
+    if (value !== "task" && !date) setDate(lastDate || todayIso());
+  }
+
   async function save() {
     let trimmed = title.trim();
     // Notes may skip the title — derive it from the first markdown line.
     if (!trimmed && type === "note") {
       trimmed = content.split("\n").find((l) => l.trim() !== "")?.replace(/^#+\s*/, "").slice(0, 80) ?? "";
     }
-    if (!trimmed || !date) {
+    if (!trimmed || (!date && type !== "task")) {
       toast(!trimmed ? (type === "note" ? "Write something first" : "A title is required") : "A date is required");
       return;
     }
@@ -211,7 +243,7 @@ export function EntryEditor() {
     const fields = {
       title: trimmed,
       type,
-      date,
+      date: date || undefined,
       startTime,
       endTime,
       color,
@@ -226,7 +258,8 @@ export function EntryEditor() {
       blockedBy: type === "task" ? blockedBy : "",
     };
     try {
-      if (editing) await updateEntry(editing.id, fields);
+      // null tells the server to clear the date.
+      if (editing) await updateEntry(editing.id, { ...fields, date: date || null });
       else await createEntry({ ...fields, type, accountId: accountId || undefined });
       close();
     } finally {
@@ -266,7 +299,7 @@ export function EntryEditor() {
             />
             <div className="seg" role="group" aria-label="Entry type">
               {TYPE_META.map(({ value, label, icon: Icon }) => (
-                <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => setType(value)}>
+                <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => chooseType(value)}>
                   <Icon size={13} /> {label}
                 </button>
               ))}
@@ -377,45 +410,42 @@ export function EntryEditor() {
             ) : (
               <>
                 <div className="editor-row">
-                  <label className="field">
-                    <span>Date</span>
-                    <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                  </label>
-                  <label className="field">
-                    <span>Repeats</span>
-                    <select
-                      className="select"
-                      value={type === "task" ? recur : "none"}
-                      disabled={type !== "task"}
-                      onChange={(e) => setRecur(e.target.value as Recur)}
-                    >
-                      {RECURS.map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="editor-row">
-                  <label className="field">
-                    <span>Start</span>
-                    <input className="input" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-                  </label>
-                  <label className="field">
-                    <span>End</span>
-                    <input className="input" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-                  </label>
-                  {startTime && (
+                  <div className="field">
+                    <span className="field-label-row">
+                      Date
+                      {type === "task" && (
+                        <label className="inline-check">
+                          <input type="checkbox" checked={undated} onChange={(e) => setNoDate(e.target.checked)} />
+                          No date
+                        </label>
+                      )}
+                    </span>
+                    {undated ? (
+                      <button type="button" className="input input-placeholder" onClick={() => setNoDate(false)}>
+                        Pick a date
+                      </button>
+                    ) : (
+                      <input
+                        className="input"
+                        type="date"
+                        aria-label="Date"
+                        value={date}
+                        // Clearing a task's date makes it undated, the same as ticking No date.
+                        onChange={(e) => (e.target.value === "" && type === "task" ? setNoDate(true) : setDate(e.target.value))}
+                      />
+                    )}
+                  </div>
+                  {!undated && (
                     <label className="field">
-                      <span>Remind</span>
+                      <span>Repeats</span>
                       <select
                         className="select"
-                        value={remind}
-                        onChange={(e) => setRemind(e.target.value === "" ? "" : Number(e.target.value))}
+                        value={type === "task" ? recur : "none"}
+                        disabled={type !== "task"}
+                        onChange={(e) => setRecur(e.target.value as Recur)}
                       >
-                        {REMINDS.map((r) => (
-                          <option key={r.label} value={r.value}>
+                        {RECURS.map((r) => (
+                          <option key={r.value} value={r.value}>
                             {r.label}
                           </option>
                         ))}
@@ -423,6 +453,34 @@ export function EntryEditor() {
                     </label>
                   )}
                 </div>
+                {!undated && (
+                  <div className="editor-row">
+                    <label className="field">
+                      <span>Start</span>
+                      <input className="input" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>End</span>
+                      <input className="input" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                    </label>
+                    {startTime && (
+                      <label className="field">
+                        <span>Remind</span>
+                        <select
+                          className="select"
+                          value={remind}
+                          onChange={(e) => setRemind(e.target.value === "" ? "" : Number(e.target.value))}
+                        >
+                          {REMINDS.map((r) => (
+                            <option key={r.label} value={r.value}>
+                              {r.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
               </>
             )}
             {accounts.length > 0 && (

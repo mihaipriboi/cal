@@ -78,7 +78,7 @@ interface PlannerState {
   exitLocal: () => void;
   /** Push on-device mail accounts up to the server just logged into. */
   importLocalAccounts: () => Promise<void>;
-  loadEntries: (params: { from?: string; to?: string; q?: string; workspace?: string }) => Promise<void>;
+  loadEntries: (params: { from?: string; to?: string; q?: string; workspace?: string; undated?: boolean }) => Promise<void>;
   workspaces: Workspace[];
   loadWorkspaces: () => Promise<void>;
   addWorkspace: (input: { name: string; color?: string; icon?: string }) => Promise<Workspace | undefined>;
@@ -352,7 +352,15 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   async updateEntry(id, patch) {
     const before = get().entries;
     const optimistic = before.map((entry) =>
-      entry.id === id ? { ...entry, ...patch, remind: patch.remind === null ? undefined : (patch.remind ?? entry.remind) } : entry,
+      entry.id === id
+        ? {
+            ...entry,
+            ...patch,
+            // null clears: a task's date (making it undated) or the reminder.
+            date: patch.date === null || patch.date === "" ? undefined : (patch.date ?? entry.date),
+            remind: patch.remind === null ? undefined : (patch.remind ?? entry.remind),
+          }
+        : entry,
     );
     set({ entries: optimistic });
     cacheEntries(optimistic);

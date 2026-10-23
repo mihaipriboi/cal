@@ -2,10 +2,11 @@ package httpapi
 
 // Email-to-task intake: POST /api/intake?token=<intakeToken> (or
 // Authorization: Bearer <intakeToken>) with
-// {subject, text, date?} creates a task. Any forwarding service (or a local
+// {subject, text, date?} creates a task (date null = undated, missing = today). Any forwarding service (or a local
 // MTA pipe) can hit it — a procmail one-liner to curl covers self-hosters.
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -30,7 +31,8 @@ func (s *Server) intake(c *gin.Context) {
 	var body struct {
 		Subject string `json:"subject"`
 		Text    string `json:"text"`
-		Date    string `json:"date"`
+		// Missing or invalid = today; an explicit null = undated.
+		Date json.RawMessage `json:"date"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.String(http.StatusBadRequest, "expected {subject, text?, date?}")
@@ -43,9 +45,12 @@ func (s *Server) intake(c *gin.Context) {
 	if len(title) > 200 {
 		title = title[:200]
 	}
-	date := body.Date
-	if _, err := time.Parse(time.DateOnly, date); err != nil {
-		date = time.Now().Format(time.DateOnly)
+	date := time.Now().Format(time.DateOnly)
+	var given string
+	if string(body.Date) == "null" {
+		date = ""
+	} else if json.Unmarshal(body.Date, &given) == nil && validDate(given) {
+		date = given
 	}
 	text := strings.TrimSpace(body.Text)
 	if len(text) > 4000 {

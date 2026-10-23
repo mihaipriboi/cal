@@ -768,6 +768,17 @@ func parsePatch(raw map[string]json.RawMessage) (store.EntryPatch, bool) {
 				return patch, false
 			}
 			patch.Recur = &v
+		case "remind":
+			// Minutes before the start time; null removes the reminder.
+			var v *int
+			if json.Unmarshal(value, &v) != nil || (v != nil && (*v < 0 || *v > 10080)) {
+				return patch, false
+			}
+			if v == nil {
+				patch.ClearRemind = true
+			} else {
+				patch.Remind = v
+			}
 		case "completed":
 			var v bool
 			if json.Unmarshal(value, &v) != nil {

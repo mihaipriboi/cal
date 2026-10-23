@@ -174,6 +174,8 @@ type EntryPatch struct {
 	// WorkspaceID/BlockedBy: nil = leave; "" = clear; uuid = set.
 	WorkspaceID *string `json:"workspaceId"`
 	BlockedBy   *string `json:"blockedBy"`
+	// ClearRemind removes the reminder (remind: null).
+	ClearRemind bool `json:"-"`
 }
 
 func New(db *pgxpool.Pool) *Store {
@@ -487,6 +489,9 @@ func (s *Store) UpdateEntry(ctx context.Context, userID, id string, patch EntryP
 	if patch.Remind != nil {
 		current.Remind = patch.Remind
 	}
+	if patch.ClearRemind {
+		current.Remind = nil
+	}
 	if patch.HasTags {
 		current.Tags = patch.Tags
 	}
@@ -512,10 +517,12 @@ func (s *Store) UpdateEntry(ctx context.Context, userID, id string, patch EntryP
 	if current.Type != "task" && current.Recur != "none" {
 		return Entry{}, ErrInvalid
 	}
-	if current.StartTime == nil && current.EndTime != nil {
+	// "" clears a time (stored as NULL), so it counts as unset here.
+	start, end := strOrEmpty(current.StartTime), strOrEmpty(current.EndTime)
+	if start == "" && end != "" {
 		return Entry{}, ErrInvalid
 	}
-	if current.StartTime != nil && current.EndTime != nil && *current.EndTime <= *current.StartTime {
+	if start != "" && end != "" && end <= start {
 		return Entry{}, ErrInvalid
 	}
 
@@ -529,7 +536,7 @@ func (s *Store) UpdateEntry(ctx context.Context, userID, id string, patch EntryP
 	}
 
 	// Rescheduling clears the reminder so it can fire again.
-	resetRemind := patch.Remind != nil || patch.StartTime != nil || patch.Date != nil
+	resetRemind := patch.Remind != nil || patch.ClearRemind || patch.StartTime != nil || patch.Date != nil
 
 	var e Entry
 	err = e.scan(tx.QueryRow(ctx, `

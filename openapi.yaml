@@ -1738,6 +1738,9 @@ components:
         remind:
           type: integer
           nullable: true
+          minimum: 0
+          maximum: 10080
+          description: Minutes before startTime; null removes the reminder
     Settings:
       type: object
       required: [country, showHolidays, theme, weekStart]

@@ -48,6 +48,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-029](#fc-029--sessions-stored-as-hashes) | auth | Session tokens stored as SHA-256; session list shows hashes, not tokens | yes |
 | [FC-030](#fc-030--logout-ends-bearer-sessions-too) | auth | Native (Bearer) logout now invalidates the session server-side | yes |
 | [FC-031](#fc-031--rename-and-recolour-subscribed-calendars) | feeds | `PATCH /api/feeds/:id` (name, colour); distinct default colours; ⋯ menu in the sidebar | yes |
+| [FC-032](#fc-032--saving-an-existing-entry-from-the-editor) | API | Entry PATCH accepts `remind` and treats empty times as unset, so editor saves work | yes |
 
 ## Details
 
@@ -459,3 +460,19 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - `TestNextFeedColor`: no repeats until the palette is used up.
   - `lib/feeds.test.ts`: the optimistic patch only touches the right feed and its events.
   - Checked by hand in headless Chromium at desktop and phone sizes: ⋯ on hover and touch, recolour visible on the event immediately, rename on Enter, Escape discards, the Settings square opens the menu, and the menu stays inside a 390 px screen.
+
+### FC-032 — Saving an existing entry from the editor
+
+- **Why:** every save of an existing entry from the editor failed with 400 "invalid entry", for two reasons:
+  - The editor sends `remind` with every save (a number, or `null` for no reminder), and `openapi.yaml` documents it on `EntryPatch`, but the PATCH handler rejected any unknown key and had no `remind` case.
+  - The editor sends `startTime` and `endTime` as `""` for an untimed entry. `""` clears a time, but `UpdateEntry`'s end-after-start check treated it as set, and `"" <= ""` failed the check.
+- **What changed:**
+  - `parsePatch` takes `remind`: an integer from 0 to 10080 (the range the `entries_remind_check` constraint allows) sets it, and `null` removes it (`EntryPatch.ClearRemind`). Anything else gives 400.
+  - Changing or removing the reminder resets `reminded_at`, the same as changing the start time, so a new reminder can fire.
+  - `UpdateEntry` treats an empty start or end time as unset when it checks the merged row, the same way the database stores it (NULL).
+  - `openapi.yaml` gives the `remind` range and what `null` means.
+- **Compatibility:** PATCHes that used to fail now succeed. No data change.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestPatchRemind`: setting 15 and then `null` round-trips, and -1, 10081 and a string give 400.
+  - `TestPatchEmptyTimes`: an editor-style save of an untimed entry succeeds, and so do setting and clearing both times. An end without a start, or an end before the start, still gives 400.

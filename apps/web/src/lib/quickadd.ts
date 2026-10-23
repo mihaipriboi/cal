@@ -6,7 +6,8 @@ import { iso } from "./date";
 
 export interface QuickAdd {
   title: string;
-  date: string;
+  /** Absent when the text names no day and no time; the caller picks the default. */
+  date?: string;
   startTime?: string;
   tags: string[];
 }
@@ -106,5 +107,6 @@ export function parseQuickAdd(input: string, today: Date = new Date()): QuickAdd
 
   const title = kept.join(" ").trim();
   if (!title) return null;
-  return { title, date: date ?? iso(today), startTime, tags };
+  // A time alone means today: a time needs a day.
+  return { title, date: date ?? (startTime ? iso(today) : undefined), startTime, tags };
 }

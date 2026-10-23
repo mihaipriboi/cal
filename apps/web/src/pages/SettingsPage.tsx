@@ -434,6 +434,28 @@ export function SettingsPage() {
                 onChange={(e) => set({ defaultRate: e.target.value === "" ? undefined : Number(e.target.value) })}
               />
             </label>
+            <label className="field">
+              <span>Quick-added tasks with no day</span>
+              <select
+                className="select"
+                value={settings.quickAddToday ? "today" : "none"}
+                onChange={(e) => set({ quickAddToday: e.target.value === "today" })}
+              >
+                <option value="none">Go to No date</option>
+                <option value="today">Go to Today</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>No date group in Tasks</span>
+              <select
+                className="select"
+                value={settings.undatedFirst ? "first" : "last"}
+                onChange={(e) => set({ undatedFirst: e.target.value === "first" })}
+              >
+                <option value="last">Shown last</option>
+                <option value="first">Shown first</option>
+              </select>
+            </label>
           </div>
         </section>
 

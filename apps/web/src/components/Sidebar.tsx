@@ -52,7 +52,7 @@ function MiniMonth({ weekStart }: { weekStart: WeekStartPref }) {
   const names = useMemo(() => weekdayNames(weekStart, "narrow"), [weekStart]);
   const counts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const entry of entries) map.set(entry.date, (map.get(entry.date) ?? 0) + 1);
+    for (const entry of entries) if (entry.date) map.set(entry.date, (map.get(entry.date) ?? 0) + 1);
     return map;
   }, [entries]);
 

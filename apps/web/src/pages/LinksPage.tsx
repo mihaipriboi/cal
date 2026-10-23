@@ -35,7 +35,7 @@ export function LinksPage() {
     () =>
       entries
         .filter((e) => e.type === "link")
-        .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)),
+        .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "") || b.createdAt.localeCompare(a.createdAt)),
     [entries],
   );
 

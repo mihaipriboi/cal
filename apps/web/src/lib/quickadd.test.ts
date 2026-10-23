@@ -4,13 +4,17 @@ import { parseQuickAdd } from "./quickadd";
 const thursday = new Date(2026, 8, 10); // Thu Sep 10 2026
 
 describe("parseQuickAdd", () => {
-  it("parses title only", () => {
-    expect(parseQuickAdd("Buy milk", thursday)).toEqual({
+  it("parses title only, leaving the date to the caller", () => {
+    expect(parseQuickAdd("Buy milk #home", thursday)).toEqual({
       title: "Buy milk",
-      date: "2026-09-10",
+      date: undefined,
       startTime: undefined,
-      tags: [],
+      tags: ["home"],
     });
+  });
+
+  it("a time without a day means today", () => {
+    expect(parseQuickAdd("standup 9:30", thursday)).toMatchObject({ date: "2026-09-10", startTime: "09:30" });
   });
 
   it("parses weekday + time + tag", () => {

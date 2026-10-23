@@ -11,7 +11,7 @@ import { useUi } from "../stores/ui";
 
 const STREAM_KEY = "cal.notes.view";
 
-function dayLabel(date: string): string {
+function dayLabel(date: string | undefined): string {
   const today = todayIso();
   if (date === today) return "Today";
   const y = new Date();
@@ -64,7 +64,7 @@ export function NotesPage() {
     return list.sort(
       (a, b) =>
         Number(b.pinned) - Number(a.pinned) ||
-        b.date.localeCompare(a.date) ||
+        (b.date ?? "").localeCompare(a.date ?? "") ||
         b.createdAt.localeCompare(a.createdAt),
     );
   }, [entries, tagFilter]);

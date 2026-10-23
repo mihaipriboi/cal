@@ -49,6 +49,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-030](#fc-030--logout-ends-bearer-sessions-too) | auth | Native (Bearer) logout now invalidates the session server-side | yes |
 | [FC-031](#fc-031--rename-and-recolour-subscribed-calendars) | feeds | `PATCH /api/feeds/:id` (name, colour); distinct default colours; ⋯ menu in the sidebar | yes |
 | [FC-032](#fc-032--saving-an-existing-entry-from-the-editor) | API | Entry PATCH accepts `remind` and treats empty times as unset, so editor saves work | yes |
+| [FC-033](#fc-033--tasks-without-a-date) | API, DB, web | Tasks may have no date: a "No date" group in Tasks, quick-add default, Schedule action | yes |
 
 ## Details
 
@@ -476,3 +477,49 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Tests:**
   - `TestPatchRemind`: setting 15 and then `null` round-trips, and -1, 10081 and a string give 400.
   - `TestPatchEmptyTimes`: an editor-style save of an untimed entry succeeds, and so do setting and clearing both times. An end without a start, or an end before the start, still gives 400.
+
+### FC-033 — Tasks without a date
+
+- **Why:** every entry needed a date, so a to-do with no particular day had to be given a fake one (usually today), where it then showed as overdue. Task apps commonly keep such tasks in an undated "inbox" list instead.
+- **What changed:**
+  - **Database.** Migration `10006`:
+    - `entries.date` and `entry_revisions.date` become nullable.
+    - A new check, `entries_undated_check`, allows a NULL date only on a task with no start time, end time, repeat or reminder, since each of those needs a day to anchor to.
+    - Two settings columns are added, `quick_add_today` and `undated_first`. Both default to false, so a client that doesn't send them keeps the defaults.
+    - Rolling back gives undated tasks their creation day and drops undated revisions.
+  - **API.**
+    - `Entry.date` is omitted for undated tasks. `POST /api/entries` accepts a task without `date` under the same rules as the check. Events, notes and links still need one. A CalDAV-synced entry can't be undated.
+    - `PATCH` with `"date": null` (or `""`) makes a task undated. If the merged entry would break the rule, it gives 400.
+    - `GET /api/entries` with a range leaves undated tasks out. `undated=1` adds them, and a query without a range always includes them. Search, export/restore, revisions, MCP and webhooks carry them.
+    - Undated tasks are skipped by `feed.ics`, the reminders, the morning digest, habit streaks and every date-range view. The agenda markdown lists open undated tasks under "No date".
+    - MCP: `create_entry` no longer requires `date` for tasks. `update_entry` takes `date: null` or `""`. `list_entries` gains `undated`, which adds undated tasks to a ranged query.
+    - Email intake: a missing or invalid `date` still means today, and `"date": null` creates an undated task.
+    - Settings: `quickAddToday` (quick-added tasks whose text names no day are dated today instead of left undated) and `undatedFirst` (the No date group is listed first instead of last).
+  - **Web.**
+    - **Tasks page.** Open undated tasks get a "No date" group, last by default. Each of those rows has a Schedule button with Today, Tomorrow, Next week (the start of next week) and a date picker.
+    - **Quick-add.** Text that names no day creates an undated task, unless `quickAddToday` is on. A time alone ("standup 9:30") still means today.
+    - **Editor.** Tasks have a "No date" checkbox, which hides the time, repeat and reminder fields. If any of those are set, it asks before removing them. Clearing a task's date field does the same. Switching an undated task to another type fills in a date.
+    - **Today page.** A collapsed "No date · N" list of open undated tasks.
+    - **Settings → General.** The two settings above.
+    - **Other pages.** Calendar views, the sidebar counts, boards, tags, trash and the command palette handle entries without a date. `formatDayShort` and `formatDayTitle` say "No date".
+  - **Docs.** `openapi.yaml` (the rules, `undated`, the nullable PATCH `date`, the intake `null`, the settings) and the README feature list.
+- **Compatibility:**
+  - API contract change: `date` may be absent on task entries, and clients that assume it's always there need to handle that.
+  - Quick-add behaviour change: text without a day used to mean today. The old behaviour is the `quickAddToday` setting.
+  - No existing data changes.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestUndatedTaskRules`: an undated task is created. An undated event or note, or an undated task with a time, repeat or reminder, gives 400. A ranged list leaves undated tasks out, `undated=1` and an unranged list include them, and search finds them. The two settings round-trip.
+  - `TestUndatedTaskPatch`: schedule, clear (refused while a time is set, allowed together with clearing the time), `""` also clears, an event can't lose its date and an undated task can't become an event. Revisions keep the NULL date, and restoring dated and undated revisions both work.
+  - `TestUndatedTaskExports`: `feed.ics` leaves undated tasks out and the agenda has "No date". Export, restore preview and restore into a fresh database keep the task undated.
+  - `TestUndatedTaskMCPAndIntake`: MCP create, schedule, unschedule, list with and without a range or `undated`. An undated MCP event fails. Intake with a missing, `null` or given date.
+  - `TestUndatedMigration`: the check rejects undated events and undated tasks with a time, repeat or reminder. Down to `10005` dates undated tasks by creation day, and Up again works.
+  - Web unit tests: `groupTasks` No date bucket and its order, `compareDates`, quick-add without a day and with a time only, `formatDayShort`/`formatDayTitle` without a date.
+  - Checked in headless Brave at desktop and phone sizes:
+    - quick-add into No date, Upcoming and Today;
+    - Schedule → Tomorrow;
+    - the editor's No date checkbox on a plain task and on a timed task (with the confirmation);
+    - Pick a date, and a switch to Event filling in a date;
+    - the Today page's No date list;
+    - both settings, and the calendar with undated tasks loaded;
+    - no horizontal scroll at 390 px.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Entry } from "@cal/api-client";
-import { allTags, groupTasks, linkDomain } from "./entries";
+import { allTags, compareDates, groupTasks, linkDomain } from "./entries";
 
 function task(partial: Partial<Entry>): Entry {
   return {
@@ -40,6 +40,29 @@ describe("groupTasks", () => {
   it("ignores non-task types", () => {
     const g = groupTasks(entries, today);
     expect(Object.values(g).flat().map((e) => e.id)).not.toContain("n");
+  });
+
+  it("puts open undated tasks in No date: pinned, then position, then newest", () => {
+    const g = groupTasks(
+      [
+        task({ id: "old", date: undefined, createdAt: "2026-09-01T00:00:00Z" }),
+        task({ id: "new", date: undefined, createdAt: "2026-09-05T00:00:00Z" }),
+        task({ id: "pin", date: undefined, pinned: true }),
+        task({ id: "pos", date: undefined, position: 1 }),
+        task({ id: "done", date: undefined, completed: true }),
+        task({ id: "dated", date: today, completed: true }),
+      ],
+      today,
+    );
+    expect(g.noDate.map((e) => e.id)).toEqual(["pin", "pos", "new", "old"]);
+    expect(g.done.map((e) => e.id)).toEqual(["dated", "done"]); // undated done last
+    expect([...g.overdue, ...g.today, ...g.upcoming]).toEqual([]);
+  });
+});
+
+describe("compareDates", () => {
+  it("sorts oldest first and undated last", () => {
+    expect([undefined, "2026-09-02", "2026-09-01"].sort(compareDates)).toEqual(["2026-09-01", "2026-09-02", undefined]);
   });
 });
 

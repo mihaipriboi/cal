@@ -101,7 +101,8 @@ func (s *Store) WorkspaceOwned(ctx context.Context, userID, workspaceID string) 
 
 // ListEntriesScoped is ListEntries plus an optional workspace filter.
 // workspace "" = all; "none" = Personal only (workspace_id IS NULL).
-func (s *Store) ListEntriesScoped(ctx context.Context, userID, from, to, q, workspace string) ([]Entry, error) {
+// A date range leaves out undated tasks unless undated is set.
+func (s *Store) ListEntriesScoped(ctx context.Context, userID, from, to, q, workspace string, undated bool) ([]Entry, error) {
 	query := `
 		SELECT ` + entryCols + `
 		FROM entries
@@ -114,13 +115,21 @@ func (s *Store) ListEntriesScoped(ctx context.Context, userID, from, to, q, work
 		query += fmt.Sprintf(" AND workspace_id = $%d::uuid", len(args)+1)
 		args = append(args, workspace)
 	}
+	var dateRange []string
 	if from != "" {
-		query += fmt.Sprintf(" AND date >= $%d", len(args)+1)
+		dateRange = append(dateRange, fmt.Sprintf("date >= $%d", len(args)+1))
 		args = append(args, from)
 	}
 	if to != "" {
-		query += fmt.Sprintf(" AND date <= $%d", len(args)+1)
+		dateRange = append(dateRange, fmt.Sprintf("date <= $%d", len(args)+1))
 		args = append(args, to)
+	}
+	if len(dateRange) > 0 {
+		cond := strings.Join(dateRange, " AND ")
+		if undated {
+			cond = "date IS NULL OR (" + cond + ")"
+		}
+		query += " AND (" + cond + ")"
 	}
 	if strings.TrimSpace(q) != "" {
 		query += fmt.Sprintf(" AND (title ILIKE $%d OR content ILIKE $%d OR $%d = ANY(tags))",

@@ -337,7 +337,7 @@ export function CommandPalette() {
       navigate(`/people/${item.person.id}`);
     } else {
       close();
-      selectDate(item.entry.date);
+      if (item.entry.date) selectDate(item.entry.date);
       openEdit(item.entry);
     }
   }

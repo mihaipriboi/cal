@@ -336,7 +336,7 @@ func (s *Server) agendaMarkdown(c *gin.Context) {
 	}
 	from := time.Now().Format("2006-01-02")
 	to := time.Now().AddDate(0, 0, days).Format("2006-01-02")
-	entries, err := s.store.ListEntries(c.Request.Context(), currentUser(c).ID, from, to, "")
+	entries, err := s.store.ListEntriesScoped(c.Request.Context(), currentUser(c).ID, from, to, "", "", true)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed")
 		return
@@ -345,8 +345,16 @@ func (s *Server) agendaMarkdown(c *gin.Context) {
 	b.WriteString(fmt.Sprintf("# Agenda — %s → %s\n\n", from, to))
 	day := ""
 	for _, e := range entries {
-		if e.Date != day {
-			day = e.Date
+		heading := e.Date
+		if heading == "" {
+			// Undated tasks sort last; only the open ones belong on an agenda.
+			if e.Completed {
+				continue
+			}
+			heading = "No date"
+		}
+		if heading != day {
+			day = heading
 			b.WriteString(fmt.Sprintf("## %s\n\n", day))
 		}
 		box := "- "

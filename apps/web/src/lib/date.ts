@@ -80,11 +80,14 @@ export function formatHeading(view: CalendarView, anchor: Date, weekStart: WeekS
   return anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
-export function formatDayTitle(value: string): string {
+/** Undated tasks have no date: both formatters say "No date" for them. */
+export function formatDayTitle(value: string | undefined): string {
+  if (!value) return "No date";
   return fromIso(value).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
-export function formatDayShort(value: string): string {
+export function formatDayShort(value: string | undefined): string {
+  if (!value) return "No date";
   return fromIso(value).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 

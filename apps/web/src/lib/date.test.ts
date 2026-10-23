@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { iso, minutesToTime, monthMatrix, rangeFor, startOfWeek, timeToMinutes, weekDays } from "./date";
+import { formatDayShort, formatDayTitle, iso, minutesToTime, monthMatrix, rangeFor, startOfWeek, timeToMinutes, weekDays } from "./date";
 
 describe("date helpers", () => {
+  it("labels a missing date as No date", () => {
+    expect(formatDayShort(undefined)).toBe("No date");
+    expect(formatDayTitle(undefined)).toBe("No date");
+    expect(formatDayShort("2026-05-11")).not.toBe("No date");
+  });
+
   it("builds Monday-first weeks", () => {
     const days = weekDays(new Date(2026, 4, 12));
     expect(days).toHaveLength(7);

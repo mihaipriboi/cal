@@ -33,6 +33,7 @@ export function MonthView({ anchor, entries, feedEvents, holidays, personDates =
   const byDate = useMemo(() => {
     const map = new Map<string, Entry[]>();
     for (const entry of entries) {
+      if (!entry.date) continue; // undated tasks have no cell
       const list = map.get(entry.date) ?? [];
       list.push(entry);
       map.set(entry.date, list);

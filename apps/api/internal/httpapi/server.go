@@ -345,6 +345,7 @@ func (s *Server) entries(c *gin.Context) {
 		c.Query("to"),
 		c.Query("q"),
 		c.Query("workspace"),
+		c.Query("undated") == "1",
 	)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed to list entries")
@@ -361,6 +362,10 @@ func (s *Server) createEntry(c *gin.Context) {
 	}
 	// accountId must reference one of the caller's CalDAV accounts.
 	if input.AccountID != nil && *input.AccountID != "" {
+		if input.Date == "" {
+			c.String(http.StatusBadRequest, "calendar sync needs a date")
+			return
+		}
 		_, owner, err := s.store.CaldavAccountWithSecret(c.Request.Context(), *input.AccountID)
 		if err != nil || owner != currentUser(c).ID {
 			c.String(http.StatusBadRequest, "unknown calendar account")
@@ -745,11 +750,19 @@ func parsePatch(raw map[string]json.RawMessage) (store.EntryPatch, bool) {
 			}
 			patch.LinkURL = &v
 		case "date":
-			var v string
-			if json.Unmarshal(value, &v) != nil || !validDate(v) {
+			// null or "" makes the task undated; the store checks it may be.
+			var v *string
+			if json.Unmarshal(value, &v) != nil {
 				return patch, false
 			}
-			patch.Date = &v
+			if v == nil || *v == "" {
+				patch.ClearDate = true
+				continue
+			}
+			if !validDate(*v) {
+				return patch, false
+			}
+			patch.Date = v
 		case "startTime":
 			var v string
 			if json.Unmarshal(value, &v) != nil || !validTime(v) {
@@ -853,7 +866,14 @@ func validAuth(input authRequest) bool {
 }
 
 func validEntry(input store.EntryInput) bool {
-	if strings.TrimSpace(input.Title) == "" || !validType(input.Type) || !validDate(input.Date) {
+	if strings.TrimSpace(input.Title) == "" || !validType(input.Type) {
+		return false
+	}
+	if input.Date == "" {
+		if !input.CanBeUndated() {
+			return false
+		}
+	} else if !validDate(input.Date) {
 		return false
 	}
 	if !validTime(input.StartTime) || !validTime(input.EndTime) {

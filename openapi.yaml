@@ -504,6 +504,12 @@ paths:
           description: Workspace scope — uuid for one space, "none" for Personal only, absent for all.
           schema:
             type: string
+        - name: undated
+          in: query
+          description: With "1", a ranged query also returns undated tasks. A query without a range always includes them.
+          schema:
+            type: string
+            enum: ["1"]
       responses:
         "200":
           description: Entries
@@ -528,7 +534,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Entry"
         "400":
-          description: Invalid entry (bad date/time order, recur on non-task, missing title)
+          description: Invalid entry (bad date/time order, recur on non-task, missing title, missing date on a non-task, or an undated task with a time, recur or remind)
   /entries/{id}:
     patch:
       description: Partial update. Completing a recurring task spawns the next occurrence.
@@ -1365,6 +1371,7 @@ paths:
   /intake:
     post:
       summary: "Email-to-task intake — {subject, text?, date?} → task"
+      description: "A missing or invalid date means today; `\"date\": null` creates an undated task."
       parameters:
         - name: token
           in: query
@@ -1635,7 +1642,7 @@ components:
           format: date-time
     Entry:
       type: object
-      required: [id, title, type, date, completed, color, tags, recur, createdAt]
+      required: [id, title, type, completed, color, tags, recur, createdAt]
       properties:
         id:
           type: string
@@ -1650,6 +1657,7 @@ components:
         date:
           type: string
           format: date
+          description: Absent only on undated tasks, which have no startTime, endTime, recur or remind
         startTime:
           type: string
           pattern: '^([01]\d|2[0-3]):[0-5]\d$'
@@ -1676,7 +1684,7 @@ components:
           format: date-time
     EntryInput:
       type: object
-      required: [title, type, date]
+      required: [title, type]
       properties:
         title:
           type: string
@@ -1689,6 +1697,7 @@ components:
         date:
           type: string
           format: date
+          description: Required except for tasks. A task without one is undated and can't have startTime, endTime, recur or remind.
         startTime:
           type: string
           pattern: '^([01]\d|2[0-3]):[0-5]\d$'
@@ -1721,6 +1730,8 @@ components:
         date:
           type: string
           format: date
+          nullable: true
+          description: null or "" makes a task undated; the merged entry must then have no time, recur or remind
         startTime:
           type: string
         endTime:
@@ -1779,6 +1790,12 @@ components:
         invidiousUrl:
           type: string
           description: Base URL of the user's Invidious instance for YouTube search (empty = off)
+        quickAddToday:
+          type: boolean
+          description: Quick-added tasks whose text names no day are dated today instead of staying undated (default false)
+        undatedFirst:
+          type: boolean
+          description: The Tasks page lists the No date group first instead of last (default false)
     File:
       type: object
       required: [id, name, origName, size, mime]

@@ -26,7 +26,7 @@ export function TagsPage() {
   }, [api, loadEntries, loadPeople]);
 
   const filtered = useMemo(
-    () => entries.filter((e) => e.tags.includes(sel)).sort((a, b) => b.date.localeCompare(a.date)),
+    () => entries.filter((e) => e.tags.includes(sel)).sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")),
     [entries, sel],
   );
   const taggedPeople = useMemo(() => people.filter((p) => (p.tags ?? []).includes(sel)), [people, sel]);

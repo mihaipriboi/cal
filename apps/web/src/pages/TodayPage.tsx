@@ -20,6 +20,7 @@ import {
 import { Cloud, CloudDrizzle, CloudFog, CloudLightning, CloudRain, CloudSun, Snowflake, Sun } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { cardAnchor, cardTrigger } from "../components/EventCard";
 import { PageHeader } from "../components/PageHeader";
 import { addDays, formatTime, iso, timeToMinutes, todayIso } from "../lib/date";
 import { groupTasks } from "../lib/entries";
@@ -78,6 +79,7 @@ export function TodayPage() {
   const settings = usePlanner((state) => state.settings);
   const openCreate = useUi((state) => state.openCreate);
   const openEdit = useUi((state) => state.openEdit);
+  const openEventCard = useUi((state) => state.openEventCard);
   const selectDate = useUi((state) => state.selectDate);
   const navigate = useNavigate();
   const [now, setNow] = useState(() => new Date());
@@ -389,6 +391,9 @@ export function TodayPage() {
                       key={e.id}
                       className={`agenda-item feed-item color-${e.color} ${live ? "live" : ""}`}
                       title={`${e.title} — ${e.feedName}${e.location ? ` · ${e.location}` : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      {...cardTrigger((el) => openEventCard({ kind: "feed", item: e, rect: cardAnchor(el) }))}
                     >
                       <span className="agenda-time">
                         {e.startTime ? formatTime(e.startTime) : "all day"}

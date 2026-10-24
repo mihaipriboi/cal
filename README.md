@@ -80,7 +80,8 @@ accounts on someone else's server — one container and it's yours.
   nightly snapshots for 14 days
 - **Sync & feeds** — two-way CalDAV, read-only Google Calendar, iCalendar feed
   subscriptions, CardDAV birthdays, RSS/Atom items on their publish date,
-  holidays for 40+ regions
+  holidays for 40+ regions; clicking a subscribed event, holiday or birthday
+  opens a read-only details card
 - **Automation** — GitHub inbox (issues/PRs become cards, status flows both
   ways), HMAC-signed webhooks out, email-to-task intake, `.ics` import/export,
   and a token-gated MCP endpoint so AI assistants can drive your planner

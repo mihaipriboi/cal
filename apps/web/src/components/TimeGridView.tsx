@@ -15,6 +15,8 @@ import type { PersonOccurrence } from "../lib/people";
 import { usePlanner } from "../stores/planner";
 import { useUi } from "../stores/ui";
 import { EntryChip } from "./EntryChip";
+import { cardAnchor, cardTrigger } from "./EventCard";
+import { FeedChip } from "./FeedChip";
 import { PersonChip } from "./PersonChip";
 
 const HOUR_H = 52;
@@ -68,6 +70,7 @@ export function TimeGridView({ view, anchor, entries, feedEvents, holidays, pers
   const openCreate = useUi((state) => state.openCreate);
   const openEdit = useUi((state) => state.openEdit);
   const setContextMenu = useUi((state) => state.setContextMenu);
+  const openEventCard = useUi((state) => state.openEventCard);
   const updateEntry = usePlanner((state) => state.updateEntry);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
@@ -125,9 +128,14 @@ export function TimeGridView({ view, anchor, entries, feedEvents, holidays, pers
               })}
             >
               {dayHolidays.map((h) => (
-                <div key={h.id} className="tg-holiday">
+                <button
+                  key={h.id}
+                  type="button"
+                  className="tg-holiday"
+                  {...cardTrigger((el) => openEventCard({ kind: "holiday", item: [h], rect: cardAnchor(el) }))}
+                >
                   {h.name}
-                </div>
+                </button>
               ))}
               {untimed
                 .filter((entry) => entry.date === date)
@@ -137,9 +145,7 @@ export function TimeGridView({ view, anchor, entries, feedEvents, holidays, pers
               {feedEvents
                 .filter((e) => e.date === date && timeToMinutes(e.startTime) === undefined)
                 .map((e) => (
-                  <div key={e.id} className={`feed-chip color-${e.color}`} title={`${e.title} — ${e.feedName}`}>
-                    <span className="title">{e.title}</span>
-                  </div>
+                  <FeedChip key={e.id} event={e} showTime={false} />
                 ))}
               {personDates
                 .filter((p) => p.date === date)
@@ -260,7 +266,11 @@ export function TimeGridView({ view, anchor, entries, feedEvents, holidays, pers
                           left: "3px",
                           right: "3px",
                         }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${e.title}, ${formatTime(e.startTime!)}`}
                         title={`${e.title} — ${e.feedName}${e.location ? ` · ${e.location}` : ""}`}
+                        {...cardTrigger((el) => openEventCard({ kind: "feed", item: e, rect: cardAnchor(el) }))}
                       >
                         <div className="t">{e.title}</div>
                         {(end - start) * (HOUR_H / 60) > 34 && (

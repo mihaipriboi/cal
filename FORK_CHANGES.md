@@ -523,3 +523,39 @@ This file lists every change the fork makes to upstream code: what changed, why,
     - the Today page's No date list;
     - both settings, and the calendar with undated tasks loaded;
     - no horizontal scroll at 390 px.
+
+### FC-034 — Details card for subscribed events, holidays and person dates
+
+- **Why:** events from subscribed calendars, holidays and birthdays/anniversaries had no way to show their details. Feed events were plain elements with only a tooltip, so clicking them did nothing, even though the API already returned their location, description, link and image. Holidays were a text label. Person dates went straight to the profile page.
+- **What changed:**
+  - **API.**
+    - `GET /api/feed-events` returns `endDate`, the last day of an event that ends on a later day than it starts. An all-day `DTEND` is exclusive, so it's the day before it. A timed event that ends exactly at midnight doesn't count as covering the next day. Single-day events leave it out.
+    - A timed event's `endTime` is now read in the start time's zone, so an event whose `DTSTART` and `DTEND` use different zones gets a consistent end time.
+    - `openapi.yaml` documents `endDate`, and `image`, which was already returned but missing from the schema.
+  - **Web.**
+    - New `EventCard`: a read-only card for a feed event, a holiday or a person date.
+      - On wide screens it's a 320 px popover beside the clicked item (on its right when there's room, otherwise its left, kept on screen). Below 640 px it's a bottom sheet that closes on a swipe down on its top bar or a tap outside.
+      - It closes with ×, Escape or a click outside, and only one is open at a time. A click that only dismisses it doesn't also reach the calendar grid underneath. × and Escape return focus to the item that opened it.
+      - It's portalled to `<body>`, and the global keyboard shortcuts pause while it's open.
+    - **Feed events** show the colour, title, date and time (or "All day", or one "Oct 30 – Nov 2" range for multi-day events), the location with a copy button (a link when it's an http(s) URL), the description, the event link and an https image. The footer has the calendar's name and "Subscribed calendar · read-only". Actions:
+      - Hide this calendar, with Undo in the toast.
+      - Rename / colour, which opens the existing feed menu. The card follows the change.
+      - Copy to my calendar: creates an own event with the same title, date, times and colour, with the description, location and link in its notes, and opens it in the editor. A multi-day event's copy keeps only its start, since an entry covers one day.
+    - **Description text.** ICS descriptions, which Google exports as HTML, are converted to plain text (`descriptionToText`):
+      - `<br>` and block tags become line breaks, and list items become bullets;
+      - script, style and comment contents are removed, other tags are stripped and entities decoded;
+      - a link keeps its URL next to its label unless the label already is the URL, and `javascript:` and other unsafe links keep only their label.
+      - Text that doesn't look like HTML is left as it is. `linkify` then links http(s) URLs, `mailto:` links and email addresses (through `safeHref`, without trailing punctuation). Everything renders as React text nodes, and descriptions longer than 8 lines get "Show more".
+    - **Holidays** show the name(s), the date, "Holiday · <country>" and a link to Settings for hiding them.
+    - **Person dates** show the name, the date, the label with "turns N", and "Open profile →".
+    - **Where the card opens from.** Feed chips in month cells, the "+N more" day list and the all-day row are now buttons (`FeedChip`); timed feed events in the week and day views and the Today page's feed items are focusable and open on Enter or Space. The month holiday label and the all-day row's holidays are buttons too. Enter on a chip no longer reaches the day cell's Enter shortcut, which would open a new entry.
+- **Compatibility:** additive API field. Clicking a person date now opens the card instead of the profile; the profile is one click further, through the card.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `TestFeedEndDate` (multi-day all-day, timed across midnight, single-day all-day, timed ending at midnight, same-day timed, mixed zones) and `TestFeedEventsEndDate` (the field through the endpoint).
+  - `lib/eventText.test.tsx`: `<br>`/`<p>`/`<div>`/list conversion, entities, link reduction and relinking, script/style/`onerror` content dropped, unsafe links not linked, plain text untouched, trailing punctuation and brackets, the date line for all-day, timed, multi-day, cross-year and other-year events, card placement, country names.
+  - Checked in headless Brave at desktop and phone sizes, in light and dark themes:
+    - the card from a month chip, the "+N more" list, a week-view timed event, the Today page, a holiday and a birthday;
+    - Escape, a click outside, Enter on a focused chip, focus returning to the chip;
+    - Show more, recolouring from the card, Hide with Undo, Copy to my calendar;
+    - the bottom sheet at 390 px with swipe-down and tap-outside, and no horizontal scroll.

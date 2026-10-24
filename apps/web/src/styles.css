@@ -888,6 +888,10 @@ button {
   font-weight: 500;
   color: var(--text-3);
   max-width: 70%;
+  text-align: left;
+}
+.holiday-label:hover {
+  color: var(--text-1);
 }
 .day-add {
   margin-left: auto;
@@ -1057,6 +1061,9 @@ button {
   background: var(--accent-softer);
 }
 .tg-holiday {
+  display: block;
+  width: 100%;
+  text-align: left;
   padding: 2px 7px;
   border-radius: var(--r-sm);
   font-size: 11px;
@@ -2064,8 +2071,16 @@ button {
     repeating-linear-gradient(-45deg, transparent, transparent 3px, rgb(0 0 0 / 0.05) 3px, rgb(0 0 0 / 0.05) 4px),
     var(--chip-bg);
   color: var(--chip);
-  cursor: default;
   border: 1px dashed color-mix(in srgb, var(--chip) 40%, transparent);
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+.feed-chip:hover, .tg-holiday:hover {
+  filter: brightness(0.96);
+}
+:root[data-theme="dark"] .feed-chip:hover, :root[data-theme="dark"] .tg-holiday:hover {
+  filter: brightness(1.2);
 }
 :root[data-theme="dark"] .feed-chip {
   background:
@@ -2083,7 +2098,7 @@ button {
 }
 
 .tg-event.feed-event {
-  cursor: default;
+  cursor: pointer;
   opacity: 0.82;
   border: 1px dashed color-mix(in srgb, var(--chip) 45%, transparent);
   background:
@@ -3448,3 +3463,178 @@ a.fact-value:hover { text-decoration: underline; }
 }
 .shop-item-note { display: block; font-size: 12px; color: var(--text-3); }
 .shop-uncertain { color: var(--c-orange, #d97706); }
+
+/* ============ Event details card (feed events, holidays, person dates) ============ */
+
+.event-card {
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-overlay);
+  color: var(--text-1);
+  box-shadow: var(--shadow-3);
+  outline: none;
+}
+.event-card:focus-visible {
+  outline: none;
+}
+.event-card.floating {
+  position: fixed;
+  width: 320px;
+  max-height: calc(100dvh - 16px);
+  border-radius: var(--r-lg);
+}
+.card-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: flex-end;
+  background: var(--scrim-strong);
+}
+.event-card.sheet {
+  width: 100%;
+  max-height: 85dvh;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.card-top {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 6px 0;
+}
+.event-card.sheet .card-top {
+  touch-action: none;
+}
+.sheet-handle {
+  align-self: center;
+  width: 36px;
+  height: 4px;
+  margin: 2px 0 0;
+  border-radius: 2px;
+  background: var(--border-1);
+}
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.card-body {
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+  padding: 0 20px 18px;
+}
+.card-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 16px;
+  align-items: start;
+}
+.card-icon {
+  display: grid;
+  place-items: center;
+  height: 21px;
+  color: var(--text-3);
+}
+.card-square {
+  width: 14px;
+  height: 14px;
+  margin: 7px 2px 0;
+  border-radius: 4px;
+  background: var(--chip, var(--c-slate));
+}
+.card-title {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 560;
+  line-height: 1.25;
+  font-variation-settings: "SOFT" 40, "WONK" 0;
+  overflow-wrap: anywhere;
+}
+.card-when {
+  margin-top: 3px;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+.card-cell {
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.card-cell a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.card-cell a:hover {
+  text-decoration: underline;
+}
+.card-location .card-cell {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+.card-copy {
+  width: 26px;
+  height: 26px;
+  margin: -3px -6px 0 0;
+}
+.card-desc {
+  white-space: pre-wrap;
+}
+.card-desc.clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  line-clamp: 8;
+  overflow: hidden;
+}
+.card-more,
+.card-link {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--accent);
+}
+.card-more {
+  margin-top: 4px;
+}
+.card-more:hover,
+.card-link:hover {
+  text-decoration: underline;
+}
+.card-muted .card-link {
+  font-size: inherit;
+}
+.card-image {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+}
+.card-source .card-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.card-feed {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 550;
+}
+.card-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chip, var(--c-slate));
+}
+.card-muted {
+  font-size: 12.5px;
+  color: var(--text-3);
+}

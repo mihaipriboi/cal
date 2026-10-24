@@ -27,6 +27,7 @@ type feedEvent struct {
 	FeedName  string  `json:"feedName"`
 	Title     string  `json:"title"`
 	Date      string  `json:"date"`
+	EndDate   string  `json:"endDate,omitempty"` // last day, only when after Date
 	StartTime *string `json:"startTime,omitempty"`
 	EndTime   *string `json:"endTime,omitempty"`
 	Color     string  `json:"color"`
@@ -299,10 +300,11 @@ func (s *Server) feedEvents(c *gin.Context) {
 				URL:      e.URL,
 				Image:    e.Image,
 				Details:  e.Description,
+				EndDate:  feedEndDate(e),
 			}
 			if !e.AllDay {
 				start := e.Start.Format("15:04")
-				end := e.End.Format("15:04")
+				end := e.End.In(e.Start.Location()).Format("15:04")
 				fe.StartTime = &start
 				fe.EndTime = &end
 			}
@@ -310,6 +312,23 @@ func (s *Server) feedEvents(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// feedEndDate is the last day an event covers, when that's after its start
+// day. An all-day DTEND is exclusive, and a timed event that ends at
+// midnight doesn't cover the day it ends on.
+func feedEndDate(e ical.Event) string {
+	end := e.End.In(e.Start.Location())
+	if e.AllDay {
+		end = end.AddDate(0, 0, -1)
+	} else {
+		end = end.Add(-time.Nanosecond)
+	}
+	last := end.Format(time.DateOnly)
+	if last <= e.Start.Format(time.DateOnly) {
+		return ""
+	}
+	return last
 }
 
 // importICS accepts a raw .ics body and converts each VEVENT into an entry.

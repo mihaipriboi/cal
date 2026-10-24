@@ -2,10 +2,12 @@ import type { Entry, FeedEvent, Holiday } from "@cal/api-client";
 import { Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { draggedEntryId, dropTargetProps } from "../lib/dnd";
-import { formatDayTitle, formatTime, iso, monthMatrix, timeToMinutes, todayIso, weekdayNames, type WeekStartPref } from "../lib/date";
+import { formatDayTitle, iso, monthMatrix, timeToMinutes, todayIso, weekdayNames, type WeekStartPref } from "../lib/date";
 import type { PersonOccurrence } from "../lib/people";
 import { useUi } from "../stores/ui";
 import { EntryChip } from "./EntryChip";
+import { cardAnchor, cardTrigger } from "./EventCard";
+import { FeedChip } from "./FeedChip";
 import { PersonChip } from "./PersonChip";
 
 interface Props {
@@ -24,6 +26,7 @@ export function MonthView({ anchor, entries, feedEvents, holidays, personDates =
   const selectDate = useUi((state) => state.selectDate);
   const selectedDate = useUi((state) => state.selectedDate);
   const openCreate = useUi((state) => state.openCreate);
+  const openEventCard = useUi((state) => state.openEventCard);
   const [dayModal, setDayModal] = useState<string | null>(null);
   const today = todayIso();
 
@@ -45,8 +48,8 @@ export function MonthView({ anchor, entries, feedEvents, holidays, personDates =
   }, [entries]);
 
   const holidayByDate = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const h of holidays) map.set(h.date, map.has(h.date) ? `${map.get(h.date)}, ${h.name}` : h.name);
+    const map = new Map<string, Holiday[]>();
+    for (const h of holidays) map.set(h.date, [...(map.get(h.date) ?? []), h]);
     return map;
   }, [holidays]);
 
@@ -91,6 +94,7 @@ export function MonthView({ anchor, entries, feedEvents, holidays, personDates =
           const dayEntries = byDate.get(date) ?? [];
           const dayFeeds = feedByDate.get(date) ?? [];
           const dayPeople = personByDate.get(date) ?? [];
+          const dayHolidays = holidayByDate.get(date);
           const isOutside = day.getMonth() !== anchor.getMonth();
           const visible = dayEntries.slice(0, MAX_VISIBLE);
           const visibleFeeds = dayFeeds.slice(0, Math.max(0, MAX_VISIBLE - visible.length));
@@ -115,7 +119,15 @@ export function MonthView({ anchor, entries, feedEvents, holidays, personDates =
             >
               <div className="day-head">
                 <span className="day-num">{day.getDate()}</span>
-                {holidayByDate.has(date) && <span className="holiday-label">{holidayByDate.get(date)}</span>}
+                {dayHolidays && (
+                  <button
+                    type="button"
+                    className="holiday-label"
+                    {...cardTrigger((el) => openEventCard({ kind: "holiday", item: dayHolidays, rect: cardAnchor(el) }))}
+                  >
+                    {dayHolidays.map((h) => h.name).join(", ")}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="icon-btn day-add"
@@ -132,14 +144,7 @@ export function MonthView({ anchor, entries, feedEvents, holidays, personDates =
                 <EntryChip key={entry.id} entry={entry} />
               ))}
               {visibleFeeds.map((event) => (
-                <div
-                  key={event.id}
-                  className={`feed-chip color-${event.color}`}
-                  title={`${event.title} — ${event.feedName}${event.location ? ` · ${event.location}` : ""}`}
-                >
-                  {event.startTime && <span className="time">{formatTime(event.startTime)}</span>}
-                  <span className="title">{event.title}</span>
-                </div>
+                <FeedChip key={event.id} event={event} />
               ))}
               {visiblePeople.map((p) => (
                 <PersonChip key={p.id} occasion={p} />
@@ -185,17 +190,10 @@ export function MonthView({ anchor, entries, feedEvents, holidays, personDates =
                 <EntryChip key={entry.id} entry={entry} />
               ))}
               {modalFeeds.map((event) => (
-                <div
-                  key={event.id}
-                  className={`feed-chip color-${event.color}`}
-                  title={`${event.title} — ${event.feedName}${event.location ? ` · ${event.location}` : ""}`}
-                >
-                  {event.startTime && <span className="time">{formatTime(event.startTime)}</span>}
-                  <span className="title">{event.title}</span>
-                </div>
+                <FeedChip key={event.id} event={event} />
               ))}
               {modalPeople.map((p) => (
-                <PersonChip key={p.id} occasion={p} onOpen={() => setDayModal(null)} />
+                <PersonChip key={p.id} occasion={p} />
               ))}
               {modalEntries.length === 0 && modalFeeds.length === 0 && modalPeople.length === 0 && (
                 <p className="panel-empty">Nothing on this day.</p>

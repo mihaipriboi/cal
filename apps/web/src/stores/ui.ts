@@ -1,6 +1,7 @@
-import type { Entry } from "@cal/api-client";
+import type { Entry, FeedEvent, Holiday } from "@cal/api-client";
 import { create } from "zustand";
 import { addDays, addMonths, todayIso, type CalendarView } from "../lib/date";
+import type { PersonOccurrence } from "../lib/people";
 
 export interface EditorPrefill {
   title?: string;
@@ -20,6 +21,21 @@ export interface ContextMenuState {
   entry: Entry;
 }
 
+/** Where the clicked item is on screen; the card opens beside it. */
+export interface CardAnchor {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/** The read-only details card for a calendar item that isn't an entry. A
+ *  day can have several holidays, which share one label and one card. */
+export type EventCardState =
+  | { kind: "feed"; item: FeedEvent; rect: CardAnchor }
+  | { kind: "holiday"; item: Holiday[]; rect: CardAnchor }
+  | { kind: "person"; item: PersonOccurrence; rect: CardAnchor };
+
 interface UiState {
   view: CalendarView;
   anchor: Date;
@@ -27,6 +43,7 @@ interface UiState {
   paletteOpen: boolean;
   editor: EditorState;
   contextMenu?: ContextMenuState;
+  eventCard?: EventCardState;
   sidebarOpen: boolean;
   hiddenTypes: Set<string>;
   hiddenFeeds: Set<string>;
@@ -41,6 +58,8 @@ interface UiState {
   openEdit: (entry: Entry) => void;
   closeEditor: () => void;
   setContextMenu: (menu?: ContextMenuState) => void;
+  openEventCard: (card: EventCardState) => void;
+  closeEventCard: () => void;
   toggleSidebar: () => void;
   closeSidebar: () => void;
   toggleType: (type: string) => void;
@@ -83,6 +102,7 @@ export const useUi = create<UiState>((set, get) => ({
   paletteOpen: false,
   editor: { mode: "closed" },
   contextMenu: undefined,
+  eventCard: undefined,
   sidebarOpen: false,
   hiddenTypes: new Set(persisted.hiddenTypes ?? []),
   hiddenFeeds: new Set(persisted.hiddenFeeds ?? []),
@@ -107,22 +127,28 @@ export const useUi = create<UiState>((set, get) => ({
     set({ selectedDate, anchor: new Date(`${selectedDate}T12:00:00`) });
   },
   openPalette() {
-    set({ paletteOpen: true, contextMenu: undefined });
+    set({ paletteOpen: true, contextMenu: undefined, eventCard: undefined });
   },
   closePalette() {
     set({ paletteOpen: false });
   },
   openCreate(date, startTime, prefill) {
-    set({ editor: { mode: "create", date: date ?? get().selectedDate, startTime, prefill }, contextMenu: undefined });
+    set({ editor: { mode: "create", date: date ?? get().selectedDate, startTime, prefill }, contextMenu: undefined, eventCard: undefined });
   },
   openEdit(entry) {
-    set({ editor: { mode: "edit", entry }, contextMenu: undefined });
+    set({ editor: { mode: "edit", entry }, contextMenu: undefined, eventCard: undefined });
   },
   closeEditor() {
     set({ editor: { mode: "closed" } });
   },
   setContextMenu(contextMenu) {
     set({ contextMenu });
+  },
+  openEventCard(eventCard) {
+    set({ eventCard, contextMenu: undefined });
+  },
+  closeEventCard() {
+    set({ eventCard: undefined });
   },
   toggleSidebar() {
     set({ sidebarOpen: !get().sidebarOpen });

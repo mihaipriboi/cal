@@ -1,22 +1,19 @@
 import { Cake, Heart } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import type { PersonOccurrence } from "../lib/people";
+import { useUi } from "../stores/ui";
+import { cardAnchor, cardTrigger } from "./EventCard";
 
 // PersonChip — a birthday/anniversary marker on the calendar. Clicking opens
-// the person's profile page.
-export function PersonChip({ occasion, onOpen }: { occasion: PersonOccurrence; onOpen?: () => void }) {
-  const navigate = useNavigate();
+// its details card, which links to the person's profile.
+export function PersonChip({ occasion }: { occasion: PersonOccurrence }) {
+  const openEventCard = useUi((state) => state.openEventCard);
   const turned = occasion.turning ? ` · turns ${occasion.turning}` : "";
   return (
     <button
       type="button"
       className={`person-chip color-${occasion.color}`}
       title={`${occasion.name} · ${occasion.label}${turned}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        onOpen?.();
-        navigate(`/people/${occasion.personId}`);
-      }}
+      {...cardTrigger((el) => openEventCard({ kind: "person", item: occasion, rect: cardAnchor(el) }))}
     >
       {occasion.label === "birthday" ? <Cake size={11} /> : <Heart size={11} />}
       <span className="title">{occasion.name}</span>

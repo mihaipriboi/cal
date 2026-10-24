@@ -1876,6 +1876,10 @@ components:
         date:
           type: string
           format: date
+        endDate:
+          type: string
+          format: date
+          description: Last day the event covers, present only when that's after `date` (an all-day DTEND is exclusive, so it's the day before it).
         startTime:
           type: string
         endTime:
@@ -1885,6 +1889,8 @@ components:
         location:
           type: string
         url:
+          type: string
+        image:
           type: string
         details:
           type: string

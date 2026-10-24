@@ -299,6 +299,8 @@ export interface FeedEvent {
   feedName: string;
   title: string;
   date: string;
+  /** Last day of an event that ends on a later day than `date`. */
+  endDate?: string;
   startTime?: string;
   endTime?: string;
   color: string;

@@ -7,6 +7,7 @@ import { BottomNav } from "./components/BottomNav";
 import { CommandPalette } from "./components/CommandPalette";
 import { ContextMenu } from "./components/ContextMenu";
 import { EntryEditor } from "./components/EntryEditor";
+import { EventCard } from "./components/EventCard";
 import { LocalShell } from "./components/LocalShell";
 import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/Toasts";
@@ -35,7 +36,7 @@ import { useUi } from "./stores/ui";
 
 function Shell() {
   const { user, mode } = usePlanner();
-  const { paletteOpen, editor, contextMenu, selectedDate } = useUi();
+  const { paletteOpen, editor, contextMenu, eventCard, selectedDate } = useUi();
   const { setView, shift, goToday, openPalette, closePalette, openCreate, setContextMenu, closeSidebar } = useUi();
   const location = useLocation();
   const navigate = useNavigate();
@@ -52,7 +53,7 @@ function Shell() {
         paletteOpen ? closePalette() : openPalette();
         return;
       }
-      if (typing || paletteOpen || editor.mode !== "closed" || contextMenu) return;
+      if (typing || paletteOpen || editor.mode !== "closed" || contextMenu || eventCard) return;
       switch (event.key) {
         case "1":
         case "2":
@@ -83,7 +84,7 @@ function Shell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [user, mode, paletteOpen, editor.mode, contextMenu, selectedDate, onCalendar, navigate, setView, shift, goToday, openPalette, closePalette, openCreate, setContextMenu, closeSidebar]);
+  }, [user, mode, paletteOpen, editor.mode, contextMenu, eventCard, selectedDate, onCalendar, navigate, setView, shift, goToday, openPalette, closePalette, openCreate, setContextMenu, closeSidebar]);
 
   // Notification reminder loop — checks every 30s for entries whose
   // start time minus `remind` minutes has arrived. Fires once per entry.
@@ -163,6 +164,7 @@ function Shell() {
       <CommandPalette />
       <EntryEditor />
       <ContextMenu />
+      <EventCard />
       <Toasts />
     </main>
   );

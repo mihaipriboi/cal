@@ -52,6 +52,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-033](#fc-033--tasks-without-a-date) | API, DB, web | Tasks may have no date: a "No date" group in Tasks, quick-add default, Schedule action | yes |
 | [FC-034](#fc-034--details-card-for-subscribed-events-holidays-and-person-dates) | API, web | Read-only details card for subscribed events, holidays and person dates; `endDate` on feed events | yes |
 | [FC-035](#fc-035--dates-and-times-in-the-settings-time-zone) | API, web | Imports, subscribed calendars, CalDAV, "today" and the now-line use the Settings time zone, never the server's | yes |
+| [FC-036](#fc-036--google-calendar-all-day-end-date) | API | Google Calendar all-day events keep their last day | yes |
 
 ## Details
 
@@ -602,3 +603,10 @@ This file lists every change the fork makes to upstream code: what changed, why,
   - `lib/date.test.ts`: `todayIso`/`zonedNow` at 00:30 and 23:30 local when UTC is on another day, and the fallback for an unknown zone.
   - Checked in headless Brave: sign-up in Tokyo stores Asia/Tokyo; a UTC account on a Bucharest device shows the banner and 08:00, and Switch saves Europe/Bucharest and refetches the event at 10:00; Keep survives a reload; on a New York device with the setting on Bucharest, the calendar's today and the now-line follow Bucharest when the two are on different dates; the banner at 390 px without horizontal scroll.
 
+### FC-036 — Google Calendar all-day end date
+
+- **Why:** the Google Calendar sync stored an all-day event's end as one second before Google's exclusive end date. Written as a `DTEND` date, that was the event's own last day, which read as exclusive cuts the last day off a multi-day event and gives a one-day event an end equal to its start.
+- **What changed:** the end date is kept exclusive, as Google and iCalendar both define it. The API-item conversion is factored out as `gcalEvents`.
+- **Compatibility:** none; the feed is rebuilt from Google on each sync.
+- **Upstreamable:** yes.
+- **Tests:** `TestGcalEvents`: a four-day all-day event's last day, a timed event's offset read as an instant, and cancelled events skipped.

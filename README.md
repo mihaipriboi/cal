@@ -87,7 +87,8 @@ accounts on someone else's server — one container and it's yours.
   and a token-gated MCP endpoint so AI assistants can drive your planner
 - **Everywhere** — offline-first PWA with a write queue, Android shell with a
   home-screen widget, Wails desktop app, share-target integration, global
-  `⌘K` palette, keyboard-first navigation. The Android app can also run
+  `⌘K` palette, keyboard-first navigation, touchpad and touch swipes between
+  months, weeks and days. The Android app can also run
   **serverless**: local mode keeps only Mail and dials your IMAP/SMTP
   provider directly from the device — accounts stay encrypted on-device and
   can be imported to a server if you set one up later

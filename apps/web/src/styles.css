@@ -830,6 +830,33 @@ button {
 
 /* ============ Month view ============ */
 
+/* The calendar body: each period is a pane that slides in and out. Vertical
+   panning stays with the browser; horizontal swipes change the period. */
+.cal-swipe {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior-x: none;
+}
+/* touch-action doesn't carry past a scroll container (the month grid, the
+   time grid's scroller), so every element sets it. */
+.cal-swipe,
+.cal-swipe * {
+  touch-action: pan-y pinch-zoom;
+}
+.cal-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+}
+html.calendar-route,
+html.calendar-route body {
+  overscroll-behavior-x: none;
+}
+
 .month-wrap {
   flex: 1;
   display: flex;

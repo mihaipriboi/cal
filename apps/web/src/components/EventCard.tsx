@@ -4,6 +4,7 @@ import { AlignLeft, CalendarDays, Cake, Copy, CopyPlus, ExternalLink, EyeOff, He
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { swallowNextClick } from "../lib/clicks";
 import { countryName, descriptionToText, eventWhen, linkify, placeCard } from "../lib/eventText";
 import type { PersonOccurrence } from "../lib/people";
 import { usePlanner } from "../stores/planner";
@@ -41,17 +42,6 @@ export function cardTrigger(open: (el: Element) => void) {
 function cardKey(card: EventCardState): string {
   if (card.kind === "holiday") return `holiday:${card.item[0]?.date}`;
   return `${card.kind}:${card.item.id}`;
-}
-
-// A click that only dismisses the card shouldn't also reach the calendar
-// grid underneath, where it would select a day or open a new entry.
-function swallowNextClick() {
-  const stop = (event: Event) => {
-    event.stopPropagation();
-    event.preventDefault();
-  };
-  window.addEventListener("click", stop, { capture: true, once: true });
-  window.setTimeout(() => window.removeEventListener("click", stop, { capture: true }), 400);
 }
 
 // EventCard shows a read-only card for a calendar item that isn't one of the
@@ -106,6 +96,9 @@ function CardView({ card, onClose }: { card: EventCardState; onClose: () => void
       const target = event.target as Element;
       if (latest.current.menu || ref.current?.contains(target) || target.closest?.(".feed-menu")) return;
       latest.current.onClose();
+      // A click that only dismisses the card shouldn't also reach the
+      // calendar grid underneath, where it would select a day or open a new
+      // entry.
       if (target.closest?.(".tg-col, .day-cell") && !target.closest("button, a, [role=button]:not(.day-cell)")) swallowNextClick();
     };
     const key = (event: KeyboardEvent) => {

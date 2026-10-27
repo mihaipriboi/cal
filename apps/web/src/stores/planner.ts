@@ -708,12 +708,14 @@ export const usePlanner = create<PlannerState>((set, get) => ({
 
   async updateSettings(settings) {
     try {
+      const before = get().settings.defaultView;
       const saved = await get().api.updateSettings(settings);
       cacheSettings(saved);
       applyTimeZone(saved);
       set({ settings: saved });
       // Changing the default view is an explicit choice — apply it here too.
-      if (saved.defaultView) useUi.getState().setView(saved.defaultView);
+      // Saving any other setting leaves the current view alone.
+      if (saved.defaultView && saved.defaultView !== before) useUi.getState().setView(saved.defaultView);
     } catch (error) {
       get().toast(error instanceof Error ? error.message : "Failed to save settings");
     }

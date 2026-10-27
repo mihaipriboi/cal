@@ -53,6 +53,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-034](#fc-034--details-card-for-subscribed-events-holidays-and-person-dates) | API, web | Read-only details card for subscribed events, holidays and person dates; `endDate` on feed events | yes |
 | [FC-035](#fc-035--dates-and-times-in-the-settings-time-zone) | API, web | Imports, subscribed calendars, CalDAV, "today" and the now-line use the Settings time zone, never the server's | yes |
 | [FC-036](#fc-036--google-calendar-all-day-end-date) | API | Google Calendar all-day events keep their last day | yes |
+| [FC-037](#fc-037--saving-settings-keeps-the-calendar-view) | web | Saving a setting other than the default view no longer switches the calendar view | yes |
 
 ## Details
 
@@ -610,3 +611,11 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** none; the feed is rebuilt from Google on each sync.
 - **Upstreamable:** yes.
 - **Tests:** `TestGcalEvents`: a four-day all-day event's last day, a timed event's offset read as an instant, and cancelled events skipped.
+
+### FC-037 — Saving settings keeps the calendar view
+
+- **Why:** every settings save applied the default view to the calendar, so changing any setting (for example the time zone) also switched a week or day view back to month.
+- **What changed:** the default view is applied only when it's the setting that changed.
+- **Compatibility:** none.
+- **Upstreamable:** yes.
+- **Tests:** checked in headless Brave: switching the time zone from the banner leaves the week view open.

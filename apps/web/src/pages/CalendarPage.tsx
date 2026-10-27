@@ -39,8 +39,9 @@ export function CalendarPage() {
   const feedsKey = usePlanner((s) => s.feeds).length;
   useEffect(() => {
     if (!user) return;
+    // The server reads feed times in the Settings zone, so a change refetches.
     void loadFeedEvents({ from: range.from, to: range.to });
-  }, [user, range.from, range.to, feedsKey, loadFeedEvents]);
+  }, [user, range.from, range.to, feedsKey, settings.timezone, loadFeedEvents]);
 
   const visible = entries.filter((entry) => !hiddenTypes.has(entry.type));
   const visibleFeeds = feedEvents.filter((event) => !hiddenFeeds.has(event.feedId));

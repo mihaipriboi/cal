@@ -193,7 +193,7 @@ func (s *Server) importBirthdays(c *gin.Context, userID string, contacts []cardd
 			}
 		}
 	}
-	year := time.Now().Format("2006")
+	year := localDay(s.store.UserLocation(c.Request.Context(), userID)).Format("2006")
 	imported := 0
 	for _, ct := range contacts {
 		title := ct.Name + "'s birthday"

@@ -1,6 +1,6 @@
 import type { Entry, FeedEvent, Holiday } from "@cal/api-client";
 import { create } from "zustand";
-import { addDays, addMonths, todayIso, type CalendarView } from "../lib/date";
+import { addDays, addMonths, fromIso, todayIso, type CalendarView } from "../lib/date";
 import type { PersonOccurrence } from "../lib/people";
 
 export interface EditorPrefill {
@@ -51,6 +51,8 @@ interface UiState {
   setAnchor: (date: Date) => void;
   shift: (direction: -1 | 1) => void;
   goToday: () => void;
+  /** After a time-zone change: moves a selection that was on the old today to the new one. */
+  followToday: (before: string, after: string) => void;
   selectDate: (date: string) => void;
   openPalette: () => void;
   closePalette: () => void;
@@ -97,7 +99,7 @@ export const useUi = create<UiState>((set, get) => ({
     persisted.view === "month" || persisted.view === "week" || persisted.view === "day"
       ? persisted.view
       : "month",
-  anchor: new Date(),
+  anchor: fromIso(todayIso()),
   selectedDate: todayIso(),
   paletteOpen: false,
   editor: { mode: "closed" },
@@ -121,7 +123,10 @@ export const useUi = create<UiState>((set, get) => ({
     else set({ anchor: addMonths(anchor, direction) });
   },
   goToday() {
-    set({ anchor: new Date(), selectedDate: todayIso() });
+    set({ anchor: fromIso(todayIso()), selectedDate: todayIso() });
+  },
+  followToday(before, after) {
+    if (get().selectedDate === before) set({ anchor: fromIso(after), selectedDate: after });
   },
   selectDate(selectedDate) {
     set({ selectedDate, anchor: new Date(`${selectedDate}T12:00:00`) });

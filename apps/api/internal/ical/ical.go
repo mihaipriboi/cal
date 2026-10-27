@@ -2,11 +2,17 @@
 // read-only feed subscriptions and file imports: VEVENT summary,
 // description, location, URL, DTSTART/DTEND in all three date forms,
 // RRULE expansion (daily/weekly/monthly/yearly) and EXDATE.
+//
+// Times keep the instant the file gives them: UTC ("Z") times are UTC and
+// TZID times are read in that zone. Floating times, all-day dates and TZIDs
+// that aren't a known zone are read in the reader's zone (ParseIn), since
+// RFC 5545 defines a floating time as local to whoever reads it.
 package ical
 
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "time/tzdata" // containers may lack zoneinfo
@@ -31,6 +37,9 @@ type Event struct {
 	AlarmMin *int
 	// TZ, when set, emits DTSTART;TZID=… with local wall time instead of UTC.
 	TZ *time.Location
+	// UnknownTZID is DTSTART's TZID when it isn't a known zone. The time was
+	// then read in the reader's zone.
+	UnknownTZID string
 }
 
 type RRule struct {
@@ -49,10 +58,21 @@ type prop struct {
 	value  string
 }
 
-// Parse decodes an iCalendar stream into VEVENT records.
+// Parse decodes an iCalendar stream into VEVENT records, reading floating
+// times and all-day dates in UTC. ParseIn reads them in a given zone.
 func Parse(data string) ([]Event, error) {
+	return ParseIn(data, time.UTC)
+}
+
+// ParseIn decodes an iCalendar stream into VEVENT records. loc is the
+// reader's zone: floating times, all-day dates and unknown TZIDs are read in
+// it.
+func ParseIn(data string, loc *time.Location) ([]Event, error) {
 	var events []Event
 	var cur *Event
+	// RRULE and DURATION may come before DTSTART, and both depend on it, so
+	// they're applied when the VEVENT ends.
+	var rrule, duration string
 	inAlarm := false
 	for _, line := range unfold(data) {
 		p := splitProp(line)
@@ -62,6 +82,7 @@ func Parse(data string) ([]Event, error) {
 		switch {
 		case p.name == "BEGIN" && p.value == "VEVENT":
 			cur = &Event{}
+			rrule, duration = "", ""
 		case p.name == "BEGIN" && p.value == "VALARM":
 			inAlarm = true
 		case p.name == "END" && p.value == "VALARM":
@@ -76,6 +97,16 @@ func Parse(data string) ([]Event, error) {
 			}
 		case p.name == "END" && p.value == "VEVENT" && cur != nil:
 			if !cur.Start.IsZero() {
+				if rrule != "" {
+					if r, err := parseRRule(rrule, cur.Start.Location()); err == nil {
+						cur.Recurrence = r
+					}
+				}
+				if duration != "" && cur.End.IsZero() {
+					if d, err := parseDuration(duration); err == nil {
+						cur.End = addDuration(cur.Start, d, cur.AllDay)
+					}
+				}
 				events = append(events, *cur)
 			}
 			cur = nil
@@ -94,30 +125,31 @@ func Parse(data string) ([]Event, error) {
 		case p.name == "IMAGE":
 			cur.Image = p.value
 		case p.name == "DTSTART":
-			t, allDay, err := parseTime(p)
+			t, allDay, err := parseTime(p, loc)
 			if err != nil {
 				return nil, fmt.Errorf("DTSTART: %w", err)
 			}
 			cur.Start, cur.AllDay = t, allDay
+			if tz := p.params["TZID"]; tz != "" && !allDay && !strings.HasSuffix(p.value, "Z") {
+				if _, ok := zoneFor(tz); !ok {
+					cur.UnknownTZID = tz
+				}
+			}
 		case p.name == "DTEND":
-			t, _, err := parseTime(p)
+			t, _, err := parseTime(p, loc)
 			if err != nil {
 				return nil, fmt.Errorf("DTEND: %w", err)
 			}
 			cur.End = t
-		case p.name == "DURATION" && cur.End.IsZero():
-			if d, err := parseDuration(p.value); err == nil {
-				cur.End = cur.Start.Add(d)
-			}
+		case p.name == "DURATION":
+			duration = p.value
 		case p.name == "RRULE":
-			if r, err := parseRRule(p.value); err == nil {
-				cur.Recurrence = r
-			}
+			rrule = p.value
 		case p.name == "EXDATE":
 			for _, part := range strings.Split(p.value, ",") {
 				q := *p
 				q.value = part
-				if t, _, err := parseTime(&q); err == nil {
+				if t, _, err := parseTime(&q, loc); err == nil {
 					cur.Exdates = append(cur.Exdates, t)
 				}
 			}
@@ -289,11 +321,12 @@ func splitProp(line string) *prop {
 	return nil
 }
 
-// parseTime handles DATE, UTC ("Z"), TZID-qualified and floating local times.
-func parseTime(p *prop) (time.Time, bool, error) {
+// parseTime handles DATE, UTC ("Z"), TZID-qualified and floating local
+// times. DATE values, floating times and unknown TZIDs are read in loc.
+func parseTime(p *prop, loc *time.Location) (time.Time, bool, error) {
 	v := p.value
 	if p.params["VALUE"] == "DATE" || len(v) == 8 {
-		t, err := time.ParseInLocation("20060102", v, time.Local)
+		t, err := time.ParseInLocation("20060102", v, loc)
 		return t, true, err
 	}
 	layout := "20060102T150405"
@@ -301,34 +334,129 @@ func parseTime(p *prop) (time.Time, bool, error) {
 		t, err := time.Parse(layout+"Z", v)
 		return t, false, err
 	}
-	loc := time.Local
 	if tz := p.params["TZID"]; tz != "" {
-		// Olson name; some feeds ship "W. Europe Standard Time"-style zones,
-		// which we map to a few common equivalents before giving up.
-		if l, err := time.LoadLocation(mapWindowsTZ(tz)); err == nil {
+		if l, ok := zoneFor(tz); ok {
 			loc = l
 		}
 	}
-	t, err := time.ParseInLocation(layout, v, loc)
-	return t, false, err
+	w, err := time.Parse(layout, v)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return WallTime(w, loc), false, nil
 }
 
+// WallTime is the instant a wall-clock time (w's date and clock, its zone
+// ignored) happens in loc, read the way RFC 5545 reads local times: a time
+// that a DST change skips moves forward by the gap (03:30 on a spring-forward
+// day is 04:30), and a time that happens twice is the first, earlier one.
+func WallTime(w time.Time, loc *time.Location) time.Time {
+	y, mo, d := w.Date()
+	h, mi, sec := w.Clock()
+	naive := time.Date(y, mo, d, h, mi, sec, 0, time.UTC)
+	// The offsets in force half a day either side cover any DST change
+	// around this wall time.
+	_, before := naive.Add(-12 * time.Hour).In(loc).Zone()
+	_, after := naive.Add(12 * time.Hour).In(loc).Zone()
+	early := naive.Add(-time.Duration(before) * time.Second)
+	late := naive.Add(-time.Duration(after) * time.Second)
+	if shows(early, loc, naive) {
+		if shows(late, loc, naive) && late.Before(early) {
+			return late.In(loc)
+		}
+		return early.In(loc)
+	}
+	if shows(late, loc, naive) {
+		return late.In(loc)
+	}
+	// Skipped: read with the offset from before the gap.
+	return early.In(loc)
+}
+
+// shows reports whether instant t reads as the wall clock of naive in loc.
+func shows(t time.Time, loc *time.Location, naive time.Time) bool {
+	l := t.In(loc)
+	y, mo, d := l.Date()
+	h, mi, s := l.Clock()
+	return time.Date(y, mo, d, h, mi, s, 0, time.UTC).Equal(naive)
+}
+
+// LocalTime is the instant of a date ("2006-01-02") and clock time
+// ("15:04") in loc, with WallTime's DST rules.
+func LocalTime(date, clock string, loc *time.Location) (time.Time, error) {
+	w, err := time.Parse("2006-01-02 15:04", date+" "+clock)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return WallTime(w, loc), nil
+}
+
+// zones caches zoneFor by TZID: feeds are parsed on every read, and
+// LoadLocation reads the zone file each time.
+var zones sync.Map
+
+// zoneFor resolves a TZID: an IANA name, a Windows name (Outlook and
+// Exchange use those), or an IANA name behind a path prefix such as
+// "/mozilla.org/20050126_1/Europe/Berlin".
+func zoneFor(tz string) (*time.Location, bool) {
+	if l, ok := zones.Load(tz); ok {
+		return l.(*time.Location), l.(*time.Location) != nil
+	}
+	name := tz
+	if mapped, ok := windowsTZ[name]; ok {
+		name = mapped
+	}
+	var loc *time.Location
+	for {
+		if name != "" && name != "Local" {
+			if l, err := time.LoadLocation(name); err == nil {
+				loc = l
+				break
+			}
+		}
+		i := strings.IndexByte(name, '/')
+		if i < 0 {
+			break
+		}
+		name = name[i+1:]
+	}
+	zones.Store(tz, loc)
+	return loc, loc != nil
+}
+
+// windowsTZ maps common Windows zone names to IANA ones, as CLDR's
+// windowsZones table does for their main region.
 var windowsTZ = map[string]string{
-	"W. Europe Standard Time":        "Europe/Berlin",
-	"Central European Standard Time": "Europe/Budapest",
+	"UTC":                            "UTC",
 	"GMT Standard Time":              "Europe/London",
+	"Greenwich Standard Time":        "Atlantic/Reykjavik",
+	"W. Europe Standard Time":        "Europe/Berlin",
+	"Romance Standard Time":          "Europe/Paris",
+	"Central Europe Standard Time":   "Europe/Budapest",
+	"Central European Standard Time": "Europe/Budapest",
+	"GTB Standard Time":              "Europe/Bucharest",
+	"E. Europe Standard Time":        "Europe/Chisinau",
+	"FLE Standard Time":              "Europe/Kiev",
+	"Turkey Standard Time":           "Europe/Istanbul",
+	"Russian Standard Time":          "Europe/Moscow",
+	"Israel Standard Time":           "Asia/Jerusalem",
+	"South Africa Standard Time":     "Africa/Johannesburg",
+	"Arabian Standard Time":          "Asia/Dubai",
+	"India Standard Time":            "Asia/Kolkata",
+	"China Standard Time":            "Asia/Shanghai",
+	"Singapore Standard Time":        "Asia/Singapore",
+	"Tokyo Standard Time":            "Asia/Tokyo",
+	"Korea Standard Time":            "Asia/Seoul",
+	"AUS Eastern Standard Time":      "Australia/Sydney",
+	"Atlantic Standard Time":         "America/Halifax",
 	"Eastern Standard Time":          "America/New_York",
 	"Central Standard Time":          "America/Chicago",
 	"Mountain Standard Time":         "America/Denver",
+	"US Mountain Standard Time":      "America/Phoenix",
 	"Pacific Standard Time":          "America/Los_Angeles",
-	"UTC":                            "UTC",
-}
-
-func mapWindowsTZ(tz string) string {
-	if mapped, ok := windowsTZ[tz]; ok {
-		return mapped
-	}
-	return tz
+	"Alaskan Standard Time":          "America/Anchorage",
+	"Hawaiian Standard Time":         "Pacific/Honolulu",
+	"E. South America Standard Time": "America/Sao_Paulo",
 }
 
 var weekdays = map[string]time.Weekday{
@@ -336,7 +464,9 @@ var weekdays = map[string]time.Weekday{
 	"TH": time.Thursday, "FR": time.Friday, "SA": time.Saturday,
 }
 
-func parseRRule(v string) (*RRule, error) {
+// parseRRule reads an RRULE value. loc is the zone of the event's start,
+// which a floating UNTIL is read in.
+func parseRRule(v string, loc *time.Location) (*RRule, error) {
 	r := &RRule{Interval: 1}
 	for _, part := range strings.Split(v, ";") {
 		kv := strings.SplitN(part, "=", 2)
@@ -351,8 +481,13 @@ func parseRRule(v string) (*RRule, error) {
 		case "COUNT":
 			fmt.Sscanf(kv[1], "%d", &r.Count)
 		case "UNTIL":
-			p := &prop{value: kv[1]}
-			if t, _, err := parseTime(p); err == nil {
+			p := &prop{value: kv[1], params: map[string]string{}}
+			if t, allDay, err := parseTime(p, loc); err == nil {
+				if allDay {
+					// UNTIL is inclusive: a date covers that whole day, also
+					// for a timed series.
+					t = t.AddDate(0, 0, 1).Add(-time.Nanosecond)
+				}
 				r.Until, r.HasUntil = t, true
 			}
 		case "BYDAY":
@@ -405,6 +540,31 @@ func parseDuration(v string) (time.Duration, error) {
 		num = 0
 	}
 	return d + time.Duration(days)*24*time.Hour, nil
+}
+
+// addDuration adds a DURATION to a start. Whole days of an all-day event
+// are calendar days, which a DST change doesn't shorten or lengthen.
+func addDuration(start time.Time, d time.Duration, allDay bool) time.Time {
+	if allDay && d%(24*time.Hour) == 0 {
+		return start.AddDate(0, 0, int(d/(24*time.Hour)))
+	}
+	return start.Add(d)
+}
+
+// LocalSlot is an event's day and times in loc, the way an entry stores
+// them: no times for an all-day event (its date is already the reader's), and
+// no end time when the event ends on a later day, since an entry covers one
+// day.
+func LocalSlot(e Event, loc *time.Location) (date, start, end string) {
+	if e.AllDay {
+		return e.Start.Format(time.DateOnly), "", ""
+	}
+	s, en := e.Start.In(loc), e.End.In(loc)
+	date, start = s.Format(time.DateOnly), s.Format("15:04")
+	if en.After(s) && en.Format(time.DateOnly) == date {
+		end = en.Format("15:04")
+	}
+	return date, start, end
 }
 
 func unescape(s string) string {

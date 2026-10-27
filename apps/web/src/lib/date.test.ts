@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { formatDayShort, formatDayTitle, iso, minutesToTime, monthMatrix, rangeFor, startOfWeek, timeToMinutes, weekDays } from "./date";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  deviceTimeZone,
+  formatDayShort,
+  formatDayTitle,
+  iso,
+  minutesToTime,
+  monthMatrix,
+  rangeFor,
+  setTimeZone,
+  startOfWeek,
+  timeToMinutes,
+  todayIso,
+  weekDays,
+  zonedNow,
+} from "./date";
 
 describe("date helpers", () => {
   it("labels a missing date as No date", () => {
@@ -52,5 +66,38 @@ describe("date helpers", () => {
     const sun = startOfWeek(new Date(2026, 4, 13), "sunday");
     expect(iso(mon)).toBe("2026-05-11");
     expect(iso(sun)).toBe("2026-05-10");
+  });
+});
+
+describe("Settings time zone", () => {
+  afterEach(() => {
+    setTimeZone(undefined);
+    vi.useRealTimers();
+  });
+
+  it("dates today in the Settings zone, not the device's", () => {
+    vi.useFakeTimers();
+    // 00:30 on Oct 26 in Bucharest (UTC+2 after the fall-back), still Oct 25 in UTC.
+    vi.setSystemTime(new Date("2026-10-25T22:30:00Z"));
+    setTimeZone("Europe/Bucharest");
+    expect(todayIso()).toBe("2026-10-26");
+    expect(zonedNow().getHours()).toBe(0);
+    expect(zonedNow().getMinutes()).toBe(30);
+    setTimeZone("UTC");
+    expect(todayIso()).toBe("2026-10-25");
+    expect(zonedNow().getHours()).toBe(22);
+    // 23:30 on Oct 26 in Bucharest is already Oct 27 at UTC+14.
+    vi.setSystemTime(new Date("2026-10-26T21:30:00Z"));
+    setTimeZone("Europe/Bucharest");
+    expect(todayIso()).toBe("2026-10-26");
+    expect(zonedNow().getHours()).toBe(23);
+    setTimeZone("Pacific/Kiritimati");
+    expect(todayIso()).toBe("2026-10-27");
+  });
+
+  it("falls back to the device's zone for an unknown name", () => {
+    setTimeZone("Mars/Olympus");
+    expect(todayIso()).toBe(iso(new Date()));
+    expect(deviceTimeZone()).toMatch(/\w/);
   });
 });

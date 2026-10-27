@@ -678,6 +678,10 @@ paths:
   /feed-events:
     get:
       summary: Expanded occurrences from all subscribed feeds in a date range (read-only)
+      description: >-
+        `from` and `to` are days in the user's Settings time zone, and each occurrence's `date`, `startTime`,
+        `endTime` and `endDate` are given in that zone. UTC (`Z`) and `TZID` times keep their instant; floating
+        times, and times whose `TZID` isn't a known zone, are read in the user's zone. All-day dates are not converted.
       parameters:
         - name: from
           in: query
@@ -703,6 +707,9 @@ paths:
   /import:
     post:
       summary: Import a .ics file; each VEVENT becomes an `event` entry (recurring rules flatten to occurrences within ±1 year)
+      description: >-
+        Times are converted to the user's Settings time zone with the same rules as `/feed-events`. An event that
+        ends on a later day in that zone keeps only its start time, since an entry covers one day.
       requestBody:
         required: true
         content:
@@ -719,6 +726,9 @@ paths:
                 properties:
                   imported:
                     type: integer
+                  zoneGuessed:
+                    type: integer
+                    description: Imported events whose TZID wasn't a known zone, read in the user's zone instead
         "400":
           description: No events found
   /settings/widget-token:
@@ -1566,6 +1576,9 @@ components:
         password:
           type: string
           minLength: 8
+        timezone:
+          type: string
+          description: Register only, optional. The new account's Settings time zone (an IANA name, usually the browser's). An unknown name is ignored and the account starts on UTC.
     User:
       type: object
       required: [id, email]
@@ -1766,6 +1779,12 @@ components:
           enum: [monday, sunday]
         accent:
           enum: [green, blue, violet, amber, rose]
+        timezone:
+          type: string
+          description: >-
+            IANA time zone (default UTC). Entry times are wall clock in this zone. "Today" on the server (intake,
+            MCP, widget, dashboard, streaks, time totals), reminders, the digest, subscribed calendars, `.ics`
+            imports, CalDAV and `feed.ics` (as TZID) use it.
         widgetToken:
           type: string
           description: Read-only token for the embeddable Today widget

@@ -10,7 +10,9 @@ import { reportErr, usePlanner } from "../stores/planner";
 const timezones: string[] = (() => {
   const zones: string[] = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
   const local = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return local && !zones.includes(local) ? [local, ...zones] : zones;
+  // Some browsers leave UTC (the default setting) out of the list.
+  const extra = [local, "UTC"].filter((tz) => tz && !zones.includes(tz));
+  return [...extra, ...zones];
 })();
 
 const ACCENTS: { value: Accent; label: string }[] = [
@@ -396,7 +398,7 @@ export function SettingsPage() {
                 value={settings.timezone || "UTC"}
                 onChange={(e) => set({ timezone: e.target.value })}
               >
-                {timezones.map((tz) => (
+                {(timezones.includes(settings.timezone || "UTC") ? timezones : [settings.timezone, ...timezones]).map((tz) => (
                   <option key={tz} value={tz}>
                     {tz}
                   </option>

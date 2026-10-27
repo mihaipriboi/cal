@@ -53,6 +53,8 @@ func (sy *Syncer) SyncAccount(ctx context.Context, userID string, a store.Caldav
 	if err != nil {
 		return err
 	}
+	// Entries hold wall-clock times in the user's Settings zone.
+	loc := sy.store.UserLocation(ctx, userID)
 	byUID := map[string]store.Entry{}
 	for _, e := range local {
 		if e.ExternalUID != nil {
@@ -85,7 +87,7 @@ func (sy *Syncer) SyncAccount(ctx context.Context, userID string, a store.Caldav
 		}
 		uid := uidFor(e)
 		href := hrefFor(e)
-		ics := encodeEntry(e, uid)
+		ics := encodeEntry(e, uid, loc)
 		etag := ""
 		if e.ExternalETag != nil {
 			etag = *e.ExternalETag
@@ -123,11 +125,11 @@ func (sy *Syncer) SyncAccount(ctx context.Context, userID string, a store.Caldav
 		} else if ok && existing.Dirty {
 			continue // local-only change; pushed in step 2, remote copy is ours
 		}
-		evs, err := ical.Parse(r.ICS)
+		evs, err := ical.ParseIn(r.ICS, loc)
 		if err != nil || len(evs) == 0 {
 			continue
 		}
-		entry := entryFrom(evs[0])
+		entry := entryFrom(evs[0], loc)
 		entry.ID = uuid.NewString()
 		if ok {
 			entry.ID = existing.ID
@@ -207,24 +209,25 @@ func uidOf(ics string) string {
 	return ""
 }
 
-func encodeEntry(e store.Entry, uid string) string {
+// encodeEntry writes an entry as a VEVENT. Its times are wall clock in loc,
+// and are written with that zone's TZID.
+func encodeEntry(e store.Entry, uid string, loc *time.Location) string {
 	d, _ := time.Parse(time.DateOnly, e.Date)
 	ev := ical.Event{
 		UID:         uid,
 		Summary:     e.Title,
 		Description: e.Content,
 		URL:         e.LinkURL,
+		TZ:          loc,
 	}
 	if e.StartTime == nil {
 		ev.AllDay = true
 		ev.Start = d
 		ev.End = d.AddDate(0, 0, 1)
 	} else {
-		start, _ := time.Parse("15:04", *e.StartTime)
-		ev.Start = time.Date(d.Year(), d.Month(), d.Day(), start.Hour(), start.Minute(), 0, 0, time.Local)
+		ev.Start, _ = ical.LocalTime(e.Date, *e.StartTime, loc)
 		if e.EndTime != nil {
-			end, _ := time.Parse("15:04", *e.EndTime)
-			ev.End = time.Date(d.Year(), d.Month(), d.Day(), end.Hour(), end.Minute(), 0, 0, time.Local)
+			ev.End, _ = ical.LocalTime(e.Date, *e.EndTime, loc)
 		} else {
 			ev.End = ev.Start.Add(time.Hour)
 		}
@@ -232,7 +235,9 @@ func encodeEntry(e store.Entry, uid string) string {
 	return ical.EncodeEvent(ev)
 }
 
-func entryFrom(ev ical.Event) store.Entry {
+// entryFrom turns a remote VEVENT into an entry, with its date and times in
+// loc.
+func entryFrom(ev ical.Event, loc *time.Location) store.Entry {
 	e := store.Entry{
 		Type:  "event",
 		Title: ev.Summary,
@@ -243,14 +248,13 @@ func entryFrom(ev ical.Event) store.Entry {
 	}
 	e.Content = ev.Description
 	e.LinkURL = ev.URL
-	e.Date = ev.Start.Format(time.DateOnly)
-	if !ev.AllDay {
-		s := ev.Start.Format("15:04")
-		e.StartTime = &s
-		if ev.End.After(ev.Start) {
-			en := ev.End.Format("15:04")
-			e.EndTime = &en
-		}
+	date, start, end := ical.LocalSlot(ev, loc)
+	e.Date = date
+	if start != "" {
+		e.StartTime = &start
+	}
+	if end != "" {
+		e.EndTime = &end
 	}
 	return e
 }

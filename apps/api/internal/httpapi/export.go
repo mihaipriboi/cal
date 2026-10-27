@@ -395,11 +395,7 @@ func (s *Server) exportICS(c *gin.Context) {
 		c.String(http.StatusUnauthorized, "invalid token")
 		return
 	}
-	settings, _ := s.store.Settings(c.Request.Context(), user.ID)
-	loc := time.Local
-	if l, err := time.LoadLocation(settings.Timezone); err == nil {
-		loc = l
-	}
+	loc := s.store.UserLocation(c.Request.Context(), user.ID)
 	entries, err := s.store.ListEntries(c.Request.Context(), user.ID, "", "", "")
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed")
@@ -433,11 +429,11 @@ func entryToEvent(e store.Entry, loc *time.Location) ical.Event {
 		ev.AllDay = true
 		ev.Start = day
 	} else {
-		if t, err := time.ParseInLocation("2006-01-02 15:04", e.Date+" "+*e.StartTime, loc); err == nil {
+		if t, err := ical.LocalTime(e.Date, *e.StartTime, loc); err == nil {
 			ev.Start = t
 		}
 		if e.EndTime != nil {
-			if t, err := time.ParseInLocation("2006-01-02 15:04", e.Date+" "+*e.EndTime, loc); err == nil {
+			if t, err := ical.LocalTime(e.Date, *e.EndTime, loc); err == nil {
 				ev.End = t
 			}
 		}

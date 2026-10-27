@@ -443,6 +443,8 @@ export interface Country {
 export interface AuthRequest {
   email: string;
   password: string;
+  /** Register only: the new account's time zone (IANA name). */
+  timezone?: string;
 }
 
 export class ApiError extends Error {
@@ -1139,7 +1141,8 @@ export class CalApi {
     return response.json();
   }
 
-  async importIcs(file: File): Promise<{ imported: number }> {
+  /** zoneGuessed counts events whose time zone wasn't recognised, read in the user's zone instead. */
+  async importIcs(file: File): Promise<{ imported: number; zoneGuessed?: number }> {
     const response = await fetch(`${this.root}/import`, {
       method: "POST",
       credentials: "include",

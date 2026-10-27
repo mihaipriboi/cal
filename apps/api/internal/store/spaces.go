@@ -416,11 +416,11 @@ func (s *Store) Dashboard(ctx context.Context, userID, workspace string) (Dashbo
 
 	_ = s.db.QueryRow(ctx, `
 		SELECT count(*) FROM entry_revisions
-		WHERE user_id = $1 AND completed AND saved_at >= current_date - 6`, userID).Scan(&d.DoneThisWeek)
+		WHERE user_id = $1 AND completed AND saved_at >= `+userDayStartSQL(userTodaySQL+` - 6`), userID).Scan(&d.DoneThisWeek)
 
 	weekRows, err := s.db.Query(ctx, `
-		SELECT created_at::date::text, count(*) FROM entries
-		WHERE user_id = $1 AND created_at >= current_date - 6`+wsClause+`
+		SELECT (created_at AT TIME ZONE `+userZoneSQL+`)::date::text, count(*) FROM entries
+		WHERE user_id = $1 AND created_at >= `+userDayStartSQL(userTodaySQL+` - 6`)+wsClause+`
 		GROUP BY 1`, wsArgs...)
 	if err == nil {
 		d.WeekActivity = map[string]int{}
@@ -458,7 +458,7 @@ func (s *Store) deadlines(ctx context.Context, userID, workspace string) ([]Entr
 	query := `
 		SELECT ` + entryCols + ` FROM entries
 		WHERE user_id = $1 AND type = 'task' AND NOT completed AND deleted_at IS NULL
-		  AND date <= current_date + 14`
+		  AND date <= ` + userTodaySQL + ` + 14`
 	args := []any{userID}
 	if workspace == "none" {
 		query += ` AND workspace_id IS NULL`

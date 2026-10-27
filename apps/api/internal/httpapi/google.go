@@ -236,29 +236,36 @@ func fetchGoogleICS(ctx context.Context, access, calendarID string) (string, err
 		return "", fmt.Errorf("events: %d", resp.StatusCode)
 	}
 	var data struct {
-		Items []struct {
-			ID          string `json:"id"`
-			Summary     string `json:"summary"`
-			Description string `json:"description"`
-			Location    string `json:"location"`
-			Status      string `json:"status"`
-			Start       struct {
-				Date     string `json:"date"`
-				DateTime string `json:"dateTime"`
-				TimeZone string `json:"timeZone"`
-			} `json:"start"`
-			End struct {
-				Date     string `json:"date"`
-				DateTime string `json:"dateTime"`
-				TimeZone string `json:"timeZone"`
-			} `json:"end"`
-		} `json:"items"`
+		Items []gcalItem `json:"items"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&data); err != nil {
 		return "", err
 	}
+	return ical.EncodeCalendar(gcalEvents(data.Items)), nil
+}
+
+type gcalTime struct {
+	Date     string `json:"date"`
+	DateTime string `json:"dateTime"`
+	TimeZone string `json:"timeZone"`
+}
+
+type gcalItem struct {
+	ID          string   `json:"id"`
+	Summary     string   `json:"summary"`
+	Description string   `json:"description"`
+	Location    string   `json:"location"`
+	Status      string   `json:"status"`
+	Start       gcalTime `json:"start"`
+	End         gcalTime `json:"end"`
+}
+
+// gcalEvents converts Google Calendar API events. A timed event's dateTime
+// carries its UTC offset, so it's an exact instant; an all-day event is a
+// date with an exclusive end date, as in iCalendar.
+func gcalEvents(items []gcalItem) []ical.Event {
 	var events []ical.Event
-	for _, it := range data.Items {
+	for _, it := range items {
 		if it.Status == "cancelled" {
 			continue
 		}
@@ -274,7 +281,7 @@ func fetchGoogleICS(ctx context.Context, access, calendarID string) (string, err
 			}
 			ev.AllDay = true
 			ev.Start = start
-			ev.End = end.Add(-time.Second)
+			ev.End = end
 		} else {
 			start, err := time.Parse(time.RFC3339, it.Start.DateTime)
 			if err != nil {
@@ -289,7 +296,7 @@ func fetchGoogleICS(ctx context.Context, access, calendarID string) (string, err
 		}
 		events = append(events, ev)
 	}
-	return ical.EncodeCalendar(events), nil
+	return events
 }
 
 func gcalPost(ctx context.Context, endpoint string, form url.Values, out any) error {

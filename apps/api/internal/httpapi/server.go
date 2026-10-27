@@ -39,6 +39,9 @@ type Server struct {
 type authRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// Timezone (register only, optional) is the new account's Settings time
+	// zone, usually the browser's. Unknown names are ignored.
+	Timezone string `json:"timezone,omitempty"`
 }
 
 func New(st *store.Store, holidays *calendar.HolidayCache) *gin.Engine {
@@ -292,6 +295,9 @@ func (s *Server) register(c *gin.Context) {
 	if err != nil {
 		c.String(http.StatusConflict, "account already exists")
 		return
+	}
+	if input.Timezone != "" && store.ValidTimezone(input.Timezone) {
+		_ = s.store.SetTimezone(c.Request.Context(), user.ID, input.Timezone)
 	}
 	session, ok := s.setSession(c, user.ID)
 	if !ok {
@@ -920,10 +926,8 @@ func validRecur(v string) bool {
 func validSettings(settings store.Settings) bool {
 	theme := settings.Theme
 	validTheme := theme == "light" || theme == "dark" || theme == "system"
-	if settings.Timezone != "" {
-		if _, err := time.LoadLocation(settings.Timezone); err != nil {
-			return false
-		}
+	if settings.Timezone != "" && !store.ValidTimezone(settings.Timezone) {
+		return false
 	}
 	if settings.DigestTime != "" && !validTime(settings.DigestTime) {
 		return false

@@ -11,6 +11,8 @@ import { EventCard } from "./components/EventCard";
 import { LocalShell } from "./components/LocalShell";
 import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/Toasts";
+import { ZoneBanner } from "./components/ZoneBanner";
+import { iso, zonedNow } from "./lib/date";
 import { CalendarPage } from "./pages/CalendarPage";
 import { BoardsPage } from "./pages/BoardsPage";
 import { SharedBoardPage } from "./pages/SharedBoardPage";
@@ -95,8 +97,9 @@ function Shell() {
     const fired = new Set<string>();
     const check = () => {
       if (Notification.permission !== "granted") return;
-      const now = new Date();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      // Entry times are wall clock in the Settings time zone.
+      const now = zonedNow();
+      const today = iso(now);
       for (const entry of usePlanner.getState().entries) {
         if (entry.remind === undefined || entry.remind === null || !entry.startTime || entry.date !== today) continue;
         if (fired.has(entry.id)) continue;
@@ -136,6 +139,7 @@ function Shell() {
     <main className="app-shell">
       <Sidebar />
       <section className="workspace">
+        <ZoneBanner />
         <Routes>
           <Route path="/" element={<CalendarPage />} />
           <Route path="/today" element={<TodayPage />} />

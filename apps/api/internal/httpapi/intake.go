@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"cal/apps/api/internal/store"
 
@@ -45,7 +44,7 @@ func (s *Server) intake(c *gin.Context) {
 	if len(title) > 200 {
 		title = title[:200]
 	}
-	date := time.Now().Format(time.DateOnly)
+	date := todayIn(s.store.UserLocation(c.Request.Context(), user.ID))
 	var given string
 	if string(body.Date) == "null" {
 		date = ""

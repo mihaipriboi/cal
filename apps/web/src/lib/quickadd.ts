@@ -2,7 +2,7 @@
 // Understands weekday names, today/tomorrow, M/D dates, month names,
 // HH:MM / h(am|pm) times, and #tags. The remainder becomes the title.
 
-import { iso } from "./date";
+import { fromIso, iso, todayIso } from "./date";
 
 export interface QuickAdd {
   title: string;
@@ -20,7 +20,7 @@ function toIso(d: Date): string {
   return iso(d);
 }
 
-export function parseQuickAdd(input: string, today: Date = new Date()): QuickAdd | null {
+export function parseQuickAdd(input: string, today: Date = fromIso(todayIso())): QuickAdd | null {
   const tags: string[] = [];
   const words = input.trim().split(/\s+/).filter(Boolean);
   const kept: string[] = [];

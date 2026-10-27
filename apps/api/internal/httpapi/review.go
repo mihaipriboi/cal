@@ -24,7 +24,7 @@ func (s *Server) weeklyReview(c *gin.Context) {
 
 // weekReview computes the digest — shared by the HTTP route and MCP tool.
 func (s *Server) weekReview(ctx context.Context, userID string) (gin.H, error) {
-	now := time.Now()
+	now := localDay(s.store.UserLocation(ctx, userID))
 	from := now.AddDate(0, 0, -6).Format(time.DateOnly)
 	to := now.Format(time.DateOnly)
 	entries, err := s.store.ListEntries(ctx, userID, from, to, "")
@@ -129,6 +129,7 @@ func (s *Server) habitStreakList(ctx context.Context, userID string) ([]habit, e
 		}
 		done[k][e.Date] = true
 	}
+	today := localDay(s.store.UserLocation(ctx, userID))
 	out := []habit{}
 	seen := map[string]bool{}
 	for _, e := range entries {
@@ -140,7 +141,7 @@ func (s *Server) habitStreakList(ctx context.Context, userID string) ([]habit, e
 		dates := done[k]
 		streak := 0
 		lastDone := ""
-		d := time.Now()
+		d := today
 		step := recurStep(e.Recur)
 		for i := 0; i < 400; i++ {
 			day := d.Format(time.DateOnly)
@@ -149,7 +150,7 @@ func (s *Server) habitStreakList(ctx context.Context, userID string) ([]habit, e
 				if lastDone == "" {
 					lastDone = day
 				}
-			} else if streak == 0 && day == time.Now().Format(time.DateOnly) {
+			} else if streak == 0 && d.Equal(today) {
 				// Today unfinished doesn't break the streak.
 			} else {
 				break

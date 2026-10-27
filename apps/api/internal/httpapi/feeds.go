@@ -220,7 +220,8 @@ func (s *Server) refreshFeed(c *gin.Context) {
 // each unseen item URL becomes a bookmark entry carrying its feed image
 // (YouTube channel videos keep their media:thumbnail as the card image).
 func syncLinkFeed(ctx context.Context, s *store.Store, userID, feedID, ics string) {
-	events, err := ical.Parse(ics)
+	loc := s.UserLocation(ctx, userID)
+	events, err := ical.ParseIn(ics, loc)
 	if err != nil {
 		return
 	}
@@ -237,7 +238,7 @@ func syncLinkFeed(ctx context.Context, s *store.Store, userID, feedID, ics strin
 			Title:   strings.TrimSpace(e.Summary),
 			Type:    "link",
 			LinkURL: url,
-			Date:    e.Start.Format("2006-01-02"),
+			Date:    e.Start.In(loc).Format(time.DateOnly),
 		}
 		if input.Title == "" {
 			input.Title = url
@@ -261,15 +262,17 @@ func syncLinkFeed(ctx context.Context, s *store.Store, userID, feedID, ics strin
 }
 
 // feedEvents expands every subscribed feed's cache into occurrences inside
-// the requested date range.
+// the requested date range. The range and each occurrence's date and times
+// are in the user's time zone.
 func (s *Server) feedEvents(c *gin.Context) {
 	from, to := c.Query("from"), c.Query("to")
 	if from == "" || to == "" {
 		c.String(http.StatusBadRequest, "from and to are required")
 		return
 	}
-	fromT, err1 := time.Parse(time.DateOnly, from)
-	toT, err2 := time.Parse(time.DateOnly, to)
+	loc := s.userZone(c)
+	fromT, err1 := time.ParseInLocation(time.DateOnly, from, loc)
+	toT, err2 := time.ParseInLocation(time.DateOnly, to, loc)
 	if err1 != nil || err2 != nil {
 		c.String(http.StatusBadRequest, "invalid dates")
 		return
@@ -284,11 +287,14 @@ func (s *Server) feedEvents(c *gin.Context) {
 		if feed.Kind == "links" {
 			continue // items live as link entries, not calendar events
 		}
-		events, err := ical.Parse(ics)
+		events, err := ical.ParseIn(ics, loc)
 		if err != nil {
 			continue
 		}
 		for _, e := range ical.Expand(events, fromT, toT.AddDate(0, 0, 1)) {
+			if !e.AllDay {
+				e.Start, e.End = e.Start.In(loc), e.End.In(loc)
+			}
 			fe := feedEvent{
 				ID:       feed.ID + ":" + e.UID + ":" + e.Start.Format("20060102T150405"),
 				FeedID:   feed.ID,
@@ -332,15 +338,17 @@ func feedEndDate(e ical.Event) string {
 }
 
 // importICS accepts a raw .ics body and converts each VEVENT into an entry.
-// Imported events keep their date/times and become non-completable "event"
-// entries; recurring rules flatten to their occurrences within ±1 year.
+// Imported events become non-completable "event" entries with their date and
+// times in the user's time zone; recurring rules flatten to their occurrences
+// within ±1 year.
 func (s *Server) importICS(c *gin.Context) {
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 4<<20))
 	if err != nil {
 		c.String(http.StatusBadRequest, "empty body")
 		return
 	}
-	events, err := ical.Parse(string(body))
+	loc := s.userZone(c)
+	events, err := ical.ParseIn(string(body), loc)
 	if err != nil || len(events) == 0 {
 		c.String(http.StatusBadRequest, "no events found in file")
 		return
@@ -348,18 +356,14 @@ func (s *Server) importICS(c *gin.Context) {
 	now := time.Now()
 	flat := ical.Expand(events, now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0))
 	user := currentUser(c)
-	created := 0
+	created, guessed := 0, 0
 	for _, e := range flat {
 		input := store.EntryInput{
 			Title:   e.Summary,
 			Type:    "event",
 			Content: strings.TrimSpace(e.Description + "\n" + e.Location),
-			Date:    e.Start.Format("2006-01-02"),
 		}
-		if !e.AllDay {
-			input.StartTime = e.Start.Format("15:04")
-			input.EndTime = e.End.Format("15:04")
-		}
+		input.Date, input.StartTime, input.EndTime = ical.LocalSlot(e, loc)
 		if e.AlarmMin != nil {
 			input.Remind = e.AlarmMin
 		}
@@ -371,8 +375,13 @@ func (s *Server) importICS(c *gin.Context) {
 			continue
 		}
 		created++
+		if e.UnknownTZID != "" {
+			guessed++
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"imported": created})
+	// zoneGuessed counts events whose time zone wasn't recognised, so their
+	// times were read in the user's zone.
+	c.JSON(http.StatusOK, gin.H{"imported": created, "zoneGuessed": guessed})
 }
 
 // widgetToday is the token-gated read used by the embeddable Today widget.
@@ -385,7 +394,7 @@ func (s *Server) widgetToday(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "failed")
 		return
 	}
-	today := time.Now().Format(time.DateOnly)
+	today := todayIn(s.store.UserLocation(c.Request.Context(), user.ID))
 	entries, err := s.store.ListEntries(c.Request.Context(), user.ID, today, today, "")
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed")

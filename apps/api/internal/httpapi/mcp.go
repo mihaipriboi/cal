@@ -506,12 +506,13 @@ func (s *Server) mcp(c *gin.Context) {
 		}
 		var entries []store.Entry
 		var err error
-		today := time.Now().Format(time.DateOnly)
+		day := localDay(s.store.UserLocation(ctx, user.ID))
+		today := day.Format(time.DateOnly)
 		switch p.URI {
 		case "cal://today":
 			entries, err = s.store.ListEntries(ctx, user.ID, today, today, "")
 		case "cal://week":
-			end := time.Now().AddDate(0, 0, 7).Format(time.DateOnly)
+			end := day.AddDate(0, 0, 7).Format(time.DateOnly)
 			entries, err = s.store.ListEntries(ctx, user.ID, today, end, "")
 		case "cal://open-tasks":
 			entries, err = s.store.ListEntries(ctx, user.ID, "", "", "")
@@ -585,7 +586,7 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 		}
 		_ = json.Unmarshal(params.Arguments, &args)
 		if params.Name == "today" {
-			today := time.Now().Format(time.DateOnly)
+			today := todayIn(s.store.UserLocation(ctx, user.ID))
 			args.From, args.To, args.Undated = today, today, false
 		}
 		entries, err := s.store.ListEntriesScoped(ctx, user.ID, args.From, args.To, args.Q, "", args.Undated)
@@ -889,7 +890,7 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 			return
 		}
 		if args.Date == "" {
-			args.Date = time.Now().Format("2006-01-02")
+			args.Date = todayIn(s.store.UserLocation(ctx, user.ID))
 		}
 		input := store.EntryInput{Title: args.Title, Type: "task", Date: args.Date, Content: args.Content, BoardID: &args.BoardID}
 		if args.ColumnID != "" {
@@ -1042,7 +1043,7 @@ func (s *Server) mcpCall(c *gin.Context, user store.User, req rpcRequest) {
 			fail("query failed")
 			return
 		}
-		respond(toolText(string(mustJSON(upcomingPersonDates(people, args.Days, time.Now()))), false))
+		respond(toolText(string(mustJSON(upcomingPersonDates(people, args.Days, localDay(s.store.UserLocation(ctx, user.ID))))), false))
 
 	case "delete_person":
 		var args struct {

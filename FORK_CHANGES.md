@@ -50,6 +50,8 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-031](#fc-031--rename-and-recolour-subscribed-calendars) | feeds | `PATCH /api/feeds/:id` (name, colour); distinct default colours; ⋯ menu in the sidebar | yes |
 | [FC-032](#fc-032--saving-an-existing-entry-from-the-editor) | API | Entry PATCH accepts `remind` and treats empty times as unset, so editor saves work | yes |
 | [FC-033](#fc-033--tasks-without-a-date) | API, DB, web | Tasks may have no date: a "No date" group in Tasks, quick-add default, Schedule action | yes |
+| [FC-034](#fc-034--details-card-for-subscribed-events-holidays-and-person-dates) | API, web | Read-only details card for subscribed events, holidays and person dates; `endDate` on feed events | yes |
+| [FC-035](#fc-035--dates-and-times-in-the-settings-time-zone) | API, web | Imports, subscribed calendars, CalDAV, "today" and the now-line use the Settings time zone, never the server's | yes |
 
 ## Details
 
@@ -559,3 +561,44 @@ This file lists every change the fork makes to upstream code: what changed, why,
     - Escape, a click outside, Enter on a focused chip, focus returning to the chip;
     - Show more, recolouring from the card, Hide with Undo, Copy to my calendar;
     - the bottom sheet at 390 px with swipe-down and tap-outside, and no horizontal scroll.
+
+### FC-035 — Dates and times in the Settings time zone
+
+- **Why:** times from other calendars were shown on the wrong clock, and "today" depended on the machine rather than the user.
+  - An `.ics` time in UTC (`DTSTART:…T070000Z`, which is how Google exports) kept its UTC wall clock, so a 10:00 Bucharest event showed as 07:00. A `TZID` time kept that zone's wall clock, which is only right when it matches the user's zone.
+  - Floating times, all-day dates and unrecognised `TZID`s (Outlook's Windows zone names other than eight common ones) were read in the server's zone (`time.Local`, usually UTC in a container).
+  - CalDAV push wrote times in the server's zone. "Today" on the server came from the server's clock or Postgres `current_date`, and in the web app from the device's zone, while reminders and the digest already used Settings → Timezone.
+- **What changed:**
+  - **iCalendar parsing** (`internal/ical`).
+    - New `ParseIn(data, loc)`, where `loc` is the reader's zone. UTC and `TZID` times keep their instant. Floating times, all-day dates and unknown `TZID`s are read in `loc`, as RFC 5545 defines floating times as local to the reader. `Parse` now uses UTC instead of `time.Local`.
+    - `TZID`s resolve through 30 Windows zone names (including `GTB Standard Time`, `E. Europe Standard Time`, `FLE Standard Time`, `Romance Standard Time`, `Central Europe Standard Time`) and IANA names behind a path prefix (`/mozilla.org/…/Europe/Berlin`). Lookups are cached. An event whose `TZID` stays unknown is marked (`UnknownTZID`).
+    - `WallTime`/`LocalTime` turn a wall-clock time into an instant with RFC 5545's DST rules: a skipped time moves forward by the gap, and a time that happens twice is the earlier one. Go's `time.Date` picks the later one.
+    - `RRULE` and `DURATION` are applied when the event ends, so they work before `DTSTART` too. A date-only `UNTIL` includes that whole day, also for a timed series. A whole-day `DURATION` on an all-day event counts calendar days.
+    - `LocalSlot(e, loc)` gives an event's day and times in `loc` the way an entry stores them.
+  - **Where the user's zone is used.**
+    - `GET /api/feed-events`: `from`/`to` are local days (local midnight to local midnight), and each occurrence's date and times are converted to the user's zone. A recolour or zone change applies on the next read, since feeds are parsed on every read.
+    - `POST /api/import`: dates and times are in the user's zone. An event that ends on a later local day keeps only its start time, as entries cover one day (such events used to fail the end-after-start check and were skipped). The response adds `zoneGuessed`, the number of events whose zone wasn't recognised.
+    - Link feeds, CalDAV pull (same rules) and CalDAV push, which writes `DTSTART;TZID=<user zone>`. `feed.ics` falls back to UTC rather than the server's zone.
+    - "Today" on the server is the user's date: email intake's default date, MCP `today`/`cal://today`/`cal://week`/board cards/upcoming person dates, the widget, GitHub cards, the weekly review and habit streaks, the agenda, the timesheet defaults, CardDAV birthday anchoring, and in SQL the dashboard deadlines and weekly counts, the activity map and time-tracking totals.
+    - The zone comes from `settings.timezone`. Empty or unknown means UTC, never the server's zone. `Local` is no longer accepted as a setting (Go reads it as the server's zone, and Postgres doesn't know it).
+  - **Sign-up.** `POST /api/auth/register` takes an optional `timezone`; the web app sends the browser's. An unknown name is ignored.
+  - **Web.**
+    - `todayIso()`, the week/day now-line, the Today page's clock, the in-browser reminder loop, quick-add's "today" and the calendar's initial day follow the Settings zone (`setTimeZone`/`zonedNow` in `lib/date.ts`), not the device's. A selection on the old today moves to the new one when the zone changes, and feed events are refetched.
+    - A one-line banner appears when the device's zone differs from the setting: "This device is in X; Cal uses Y" with Switch (saves the device's zone) and Keep (hides it on this device until either zone changes).
+    - The import toast says how many events used the user's zone because theirs wasn't recognised. The Settings zone list always includes UTC and the current value. The Notes "Yesterday" label compared against the UTC date and now uses the local one.
+  - **Docs.** `openapi.yaml`: the `timezone` setting, the register field, the feed-events and import rules, and `zoneGuessed`.
+- **Compatibility:**
+  - Entry storage doesn't change: entries still hold wall-clock date and times, now always meant in the Settings zone.
+  - Accounts on the default `UTC` see subscribed and imported times on the UTC clock until they set their zone; the banner offers it. Entries imported from `.ics` files before this change hold the time as it was read then and aren't converted.
+  - `Local` as a timezone setting is rejected (400).
+- **Upstreamable:** yes.
+- **Tests:**
+  - `internal/ical/zone_test.go`: UTC, IANA, Windows, path-prefixed, unknown, floating and all-day events read by a Bucharest and a UTC reader; `WallTime` on both DST days in Bucharest (2026-10-25, 2027-03-28); events on those days; a weekly `TZID` series keeping 09:00 across the change while a UTC series moves; date-only `UNTIL`; `LocalSlot` across local midnight.
+  - `TestFeedEventsInUserZone`: the same instants for a Bucharest and a UTC user, both DST days, and a one-day range that starts at local midnight (an event at 01:30 local on Nov 1 is in it, one at 23:30 local on Oct 31 isn't).
+  - `TestImportICSInUserZone`: each kind of time, `zoneGuessed`, and an overnight event keeping its start.
+  - `TestTodayInUserZone`: with Kiritimati (UTC+14) and Pago Pago (UTC−11), intake's default date, MCP `today` and the dashboard's 14-day deadline window follow the setting.
+  - `TestRegisterTimezone`: the sign-up zone, and `Local` or unknown zones refused or ignored.
+  - `caldav.TestEntryZones`: push writes `TZID`, pull converts, and a push reads back the same.
+  - `lib/date.test.ts`: `todayIso`/`zonedNow` at 00:30 and 23:30 local when UTC is on another day, and the fallback for an unknown zone.
+  - Checked in headless Brave: sign-up in Tokyo stores Asia/Tokyo; a UTC account on a Bucharest device shows the banner and 08:00, and Switch saves Europe/Bucharest and refetches the event at 10:00; Keep survives a reload; on a New York device with the setting on Bucharest, the calendar's today and the now-line follow Bucharest when the two are on different dates; the banner at 390 px without horizontal scroll.
+

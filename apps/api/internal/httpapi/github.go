@@ -190,7 +190,7 @@ func (s *Server) githubImport(c *gin.Context) {
 		Title:    fmt.Sprintf("%s/%s #%s — %s", owner, repo, num, it.Title),
 		Type:     "task",
 		LinkURL:  body.URL,
-		Date:     time.Now().Format("2006-01-02"),
+		Date:     todayIn(s.userZone(c)),
 		Tags:     []string{"github", owner + "/" + repo},
 		BoardID:  body.BoardID,
 		ColumnID: body.ColumnID,

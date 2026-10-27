@@ -8,6 +8,7 @@ import {
   timeToMinutes,
   todayIso,
   weekDays,
+  zonedNow,
   type CalendarView,
   type WeekStartPref,
 } from "../lib/date";
@@ -73,7 +74,7 @@ export function TimeGridView({ view, anchor, entries, feedEvents, holidays, pers
   const openEventCard = useUi((state) => state.openEventCard);
   const updateEntry = usePlanner((state) => state.updateEntry);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState(() => zonedNow());
   const today = todayIso();
 
   const days = useMemo(() => (view === "day" ? [anchor] : weekDays(anchor, weekStart)), [view, anchor, weekStart]);
@@ -81,7 +82,7 @@ export function TimeGridView({ view, anchor, entries, feedEvents, holidays, pers
   const dates = days.map(iso);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    const timer = window.setInterval(() => setNow(zonedNow()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
 

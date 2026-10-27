@@ -13,8 +13,52 @@ export function fromIso(value: string): Date {
   return new Date(year, month - 1, day);
 }
 
+// The Settings time zone. "Today", the now-line and reminders follow it, not
+// the device's zone; undefined (before settings load) means the device's.
+let zoneParts: Intl.DateTimeFormat | undefined;
+let zoneName: string | undefined;
+
+/** The device's IANA time zone, e.g. "Europe/Bucharest". */
+export function deviceTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+/** Uses tz (an IANA name) for "now" and "today"; unknown names fall back to the device's zone. */
+export function setTimeZone(tz: string | undefined): void {
+  if (tz === zoneName) return;
+  zoneName = tz;
+  zoneParts = undefined;
+  if (!tz || tz === deviceTimeZone()) return;
+  try {
+    zoneParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hourCycle: "h23",
+    });
+  } catch {
+    zoneParts = undefined;
+  }
+}
+
+/**
+ * The current wall-clock time in the Settings time zone, as a Date whose
+ * local fields (getDate, getHours…) read that zone's date and time. Use it
+ * for "today" and the time of day, never for instants.
+ */
+export function zonedNow(now: Date = new Date()): Date {
+  if (!zoneParts) return now;
+  const part: Record<string, number> = {};
+  for (const p of zoneParts.formatToParts(now)) part[p.type] = Number(p.value);
+  return new Date(part.year, part.month - 1, part.day, part.hour, part.minute, part.second);
+}
+
 export function todayIso(): string {
-  return iso(new Date());
+  return iso(zonedNow());
 }
 
 export function addDays(date: Date, days: number): Date {

@@ -22,7 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { cardAnchor, cardTrigger } from "../components/EventCard";
 import { PageHeader } from "../components/PageHeader";
-import { addDays, formatTime, iso, timeToMinutes, todayIso } from "../lib/date";
+import { addDays, formatTime, iso, timeToMinutes, todayIso, zonedNow } from "../lib/date";
 import { groupTasks } from "../lib/entries";
 import { moduleOn } from "../lib/modules";
 import { daysLabel, upcomingDates } from "../lib/people";
@@ -82,7 +82,7 @@ export function TodayPage() {
   const openEventCard = useUi((state) => state.openEventCard);
   const selectDate = useUi((state) => state.selectDate);
   const navigate = useNavigate();
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState(() => zonedNow());
   const [weather, setWeather] = useState<Weather | null>(null);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [review, setReview] = useState<WeekReview | null>(null);
@@ -96,7 +96,7 @@ export function TodayPage() {
   const today = todayIso();
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    const timer = window.setInterval(() => setNow(zonedNow()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -127,7 +127,7 @@ export function TodayPage() {
   const feeds = usePlanner((state) => state.feeds);
   useEffect(() => {
     if (feeds.length) void loadFeedEvents({ from: today, to: today });
-  }, [feeds.length, today, loadFeedEvents]);
+  }, [feeds.length, today, settings.timezone, loadFeedEvents]);
 
   const dayEntries = useMemo(
     () => entries.filter((e) => e.date === today).sort((a, b) => (timeToMinutes(a.startTime) ?? 9999) - (timeToMinutes(b.startTime) ?? 9999)),

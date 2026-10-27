@@ -29,6 +29,7 @@ import { enqueue, isOfflineError, newTempId, readQueue, writeQueue } from "../li
 import { clearImport, isLocalMode, markLocalMode, wantsImport } from "../lib/local";
 import { nativeMail } from "../lib/mail";
 import { applyFeedPatch, type FeedPatch } from "../lib/feeds";
+import { deviceTimeZone, setTimeZone, todayIso } from "../lib/date";
 import { useUi } from "./ui";
 
 // Synthetic identity for local mode — there is no account, just this device.
@@ -41,6 +42,15 @@ export interface Toast {
 }
 
 let toastSeq = 0;
+
+// applyTimeZone makes "today" follow the Settings time zone. A calendar
+// still showing the old zone's today moves to the new one.
+function applyTimeZone(settings: Settings) {
+  const before = todayIso();
+  setTimeZone(settings.timezone);
+  const after = todayIso();
+  if (after !== before) useUi.getState().followToday(before, after);
+}
 
 // pushWidgetConfig hands the Android home widget the server origin + the
 // read-only widget token. No-ops outside the Capacitor shell.
@@ -145,6 +155,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       cacheSettings(settings);
       cacheUser(user);
       pushWidgetConfig(settings);
+      applyTimeZone(settings);
       set({ user, settings, booted: true, offline: false });
       useUi.getState().applyDefaultView(settings.defaultView);
       void get().loadCountries();
@@ -169,6 +180,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     cacheSettings(settings);
     cacheUser(user);
     pushWidgetConfig(settings);
+    applyTimeZone(settings);
     set({ user, settings, error: undefined, offline: false });
     useUi.getState().applyDefaultView(settings.defaultView);
     void get().loadCountries();
@@ -177,11 +189,13 @@ export const usePlanner = create<PlannerState>((set, get) => ({
 
   async register(email, password, server) {
     if (server !== undefined) get().api.setServer(server);
-    const { user } = await get().api.register({ email, password });
+    // A new account starts in this device's time zone.
+    const { user } = await get().api.register({ email, password, timezone: deviceTimeZone() });
     const settings = await get().api.settings();
     cacheSettings(settings);
     cacheUser(user);
     pushWidgetConfig(settings);
+    applyTimeZone(settings);
     set({ user, settings, error: undefined, offline: false });
     useUi.getState().applyDefaultView(settings.defaultView);
     void get().loadCountries();
@@ -653,7 +667,10 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   async importIcs(file) {
     try {
       const out = await get().api.importIcs(file);
-      get().toast(`Imported ${out.imported} event${out.imported === 1 ? "" : "s"}`);
+      const guessed = out.zoneGuessed
+        ? `. ${out.zoneGuessed} used your time zone, because theirs wasn't recognised`
+        : "";
+      get().toast(`Imported ${out.imported} event${out.imported === 1 ? "" : "s"}${guessed}`);
     } catch (error) {
       get().toast(error instanceof Error ? error.message : "Import failed");
     }
@@ -693,6 +710,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     try {
       const saved = await get().api.updateSettings(settings);
       cacheSettings(saved);
+      applyTimeZone(saved);
       set({ settings: saved });
       // Changing the default view is an explicit choice — apply it here too.
       if (saved.defaultView) useUi.getState().setView(saved.defaultView);
@@ -711,6 +729,9 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     set({ toasts: get().toasts.filter((toast) => toast.id !== id) });
   },
 }));
+
+// The cached settings' zone applies until the server's settings arrive.
+applyTimeZone(usePlanner.getState().settings);
 
 // offerImport runs after a successful server login: if the app was used in
 // local mode, suggest pushing the on-device mail accounts up to the server.

@@ -91,8 +91,9 @@ func (s *Server) timeSummary(c *gin.Context) {
 
 // timeLog — the timesheet: finished sessions in a range.
 func (s *Server) timeLog(c *gin.Context) {
-	from := c.DefaultQuery("from", time.Now().AddDate(0, 0, -14).Format("2006-01-02"))
-	to := c.DefaultQuery("to", time.Now().Format("2006-01-02"))
+	today := localDay(s.userZone(c))
+	from := c.DefaultQuery("from", today.AddDate(0, 0, -14).Format(time.DateOnly))
+	to := c.DefaultQuery("to", today.Format(time.DateOnly))
 	items, err := s.store.TimeLog(c.Request.Context(), currentUser(c).ID, from, to)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed")
@@ -115,8 +116,9 @@ func (s *Server) deleteTimeEntry(c *gin.Context) {
 // timeExport — solidtime-compatible CSV/JSON: description, project, start,
 // end, duration, billable, rate, amount.
 func (s *Server) timeExport(c *gin.Context) {
-	from := c.DefaultQuery("from", time.Now().AddDate(0, 0, -90).Format("2006-01-02"))
-	to := c.DefaultQuery("to", time.Now().Format("2006-01-02"))
+	today := localDay(s.userZone(c))
+	from := c.DefaultQuery("from", today.AddDate(0, 0, -90).Format(time.DateOnly))
+	to := c.DefaultQuery("to", today.Format(time.DateOnly))
 	items, err := s.store.TimeLog(c.Request.Context(), currentUser(c).ID, from, to)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed")
@@ -334,8 +336,9 @@ func (s *Server) agendaMarkdown(c *gin.Context) {
 	if days < 1 || days > 60 {
 		days = 7
 	}
-	from := time.Now().Format("2006-01-02")
-	to := time.Now().AddDate(0, 0, days).Format("2006-01-02")
+	today := localDay(s.userZone(c))
+	from := today.Format(time.DateOnly)
+	to := today.AddDate(0, 0, days).Format(time.DateOnly)
 	entries, err := s.store.ListEntriesScoped(c.Request.Context(), currentUser(c).ID, from, to, "", "", true)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "failed")

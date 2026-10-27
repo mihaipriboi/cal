@@ -777,6 +777,41 @@ button {
   align-items: center;
   gap: 2px;
 }
+.zone-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 7px 20px;
+  font-size: 13px;
+  color: var(--text-1);
+  background: var(--accent-softer);
+  border-bottom: 1px solid var(--border-2);
+}
+.zone-banner > svg {
+  flex: none;
+  color: var(--accent);
+}
+.zone-banner-text {
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.zone-banner-actions {
+  display: flex;
+  gap: 4px;
+}
+.zone-banner .btn {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+@media (max-width: 640px) {
+  .zone-banner {
+    padding: 7px 12px;
+  }
+}
+
 .offline-note {
   display: inline-flex;
   align-items: center;

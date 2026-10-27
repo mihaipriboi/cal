@@ -5,7 +5,7 @@
 import { LayoutGrid, ListOrdered, Pin, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
-import { formatDayShort, todayIso } from "../lib/date";
+import { addDays, formatDayShort, fromIso, iso, todayIso } from "../lib/date";
 import { usePlanner } from "../stores/planner";
 import { useUi } from "../stores/ui";
 
@@ -14,9 +14,7 @@ const STREAM_KEY = "cal.notes.view";
 function dayLabel(date: string | undefined): string {
   const today = todayIso();
   if (date === today) return "Today";
-  const y = new Date();
-  y.setDate(y.getDate() - 1);
-  if (date === y.toISOString().slice(0, 10)) return "Yesterday";
+  if (date === iso(addDays(fromIso(today), -1))) return "Yesterday";
   return formatDayShort(date);
 }
 

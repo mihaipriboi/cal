@@ -1658,7 +1658,7 @@ func (s *Store) RestoreFiles(ctx context.Context, userID string, files []File) (
 func (s *Store) Activity(ctx context.Context, userID string, days int) (map[string]int, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT date::text, count(*) FROM entries
-		WHERE user_id = $1 AND deleted_at IS NULL AND date >= current_date - $2::int
+		WHERE user_id = $1 AND deleted_at IS NULL AND date >= `+userTodaySQL+` - $2::int
 		GROUP BY date`, userID, days)
 	if err != nil {
 		return nil, err
@@ -1955,18 +1955,18 @@ func (s *Store) TimeSummary(ctx context.Context, userID string) (map[string]any,
 		SELECT coalesce(sum(EXTRACT(EPOCH FROM coalesce(end_at, now()) - start_at))/60,0)::int,
 		       coalesce(sum(CASE WHEN billable AND hourly_rate IS NOT NULL
 		            THEN EXTRACT(EPOCH FROM coalesce(end_at, now()) - start_at)/3600 * hourly_rate END),0)
-		FROM time_entries WHERE user_id = $1 AND start_at::date = current_date`, userID).Scan(&today, &billableAmount)
+		FROM time_entries WHERE user_id = $1 AND (start_at AT TIME ZONE `+userZoneSQL+`)::date = `+userTodaySQL, userID).Scan(&today, &billableAmount)
 	if err != nil {
 		return nil, err
 	}
 	_ = s.db.QueryRow(ctx, `
 		SELECT coalesce(sum(EXTRACT(EPOCH FROM coalesce(end_at, now()) - start_at))/60,0)::int
-		FROM time_entries WHERE user_id = $1 AND start_at >= current_date - 6`, userID).Scan(&week)
+		FROM time_entries WHERE user_id = $1 AND start_at >= `+userDayStartSQL(userTodaySQL+` - 6`), userID).Scan(&week)
 	rows, err := s.db.Query(ctx, `
 		SELECT t.entry_id::text, coalesce(e.title,''),
 		       (sum(EXTRACT(EPOCH FROM coalesce(t.end_at, now()) - t.start_at))/60)::int AS mins
 		FROM time_entries t LEFT JOIN entries e ON e.id = t.entry_id
-		WHERE t.user_id = $1 AND t.start_at::date = current_date AND t.entry_id IS NOT NULL
+		WHERE t.user_id = $1 AND (t.start_at AT TIME ZONE `+userZoneSQL+`)::date = `+userTodaySQL+` AND t.entry_id IS NOT NULL
 		GROUP BY t.entry_id, e.title ORDER BY mins DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -2189,7 +2189,7 @@ func (s *Store) TimeLog(ctx context.Context, userID, from, to string) ([]TimeEnt
 		FROM time_entries t
 		LEFT JOIN entries e ON e.id = t.entry_id
 		LEFT JOIN boards b ON b.id = t.project_id
-		WHERE t.user_id = $1 AND t.start_at::date >= $2::date AND t.start_at::date <= $3::date
+		WHERE t.user_id = $1 AND (t.start_at AT TIME ZONE `+userZoneSQL+`)::date BETWEEN $2::date AND $3::date
 		ORDER BY t.start_at DESC`, userID, from, to)
 	if err != nil {
 		return nil, err

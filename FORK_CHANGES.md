@@ -54,6 +54,7 @@ This file lists every change the fork makes to upstream code: what changed, why,
 | [FC-035](#fc-035--dates-and-times-in-the-settings-time-zone) | API, web | Imports, subscribed calendars, CalDAV, "today" and the now-line use the Settings time zone, never the server's | yes |
 | [FC-036](#fc-036--google-calendar-all-day-end-date) | API | Google Calendar all-day events keep their last day | yes |
 | [FC-037](#fc-037--saving-settings-keeps-the-calendar-view) | web | Saving a setting other than the default view no longer switches the calendar view | yes |
+| [FC-038](#fc-038--swipe-between-months-weeks-and-days) | web | Two-finger touchpad and finger swipes move the calendar a period; periods slide in | yes |
 
 ## Details
 
@@ -619,3 +620,27 @@ This file lists every change the fork makes to upstream code: what changed, why,
 - **Compatibility:** none.
 - **Upstreamable:** yes.
 - **Tests:** checked in headless Brave: switching the time zone from the banner leaves the week view open.
+
+### FC-038 — Swipe between months, weeks and days
+
+- **Why:** the calendar only moved between periods with the ‹ › buttons and the arrow keys. Swiping sideways on a touchpad or a touch screen, the usual way in calendar apps, did nothing.
+- **What changed:**
+  - **Touchpad.** A two-finger horizontal swipe over the calendar body moves one month, week or day, depending on the view. Content moving left (fingers moving left with natural scrolling) goes to the next period, as in other calendars.
+    - One swipe is one step, however long the touchpad's momentum continues: a gesture fires once after 60 px of horizontal movement, and the rest of it is absorbed until 250 ms pass without wheel events.
+    - A gesture counts as horizontal only when its horizontal movement is more than 1.5× its vertical movement, decided in its first 12 px. A gesture that starts vertical stays vertical, so scrolling a week's time grid never changes the week. Pinch-zoom (ctrl+wheel) is ignored.
+    - The horizontal gesture's wheel events have their default prevented, and the calendar route sets `overscroll-behavior-x: none`, so the browser's back/forward swipe doesn't fire over the calendar.
+  - **Touch.** A finger swipe moves one period when it covers a quarter of the width or is a quick flick (over 0.35 px/ms and 40 px). The calendar follows the finger while dragging, then slides through or snaps back.
+    - A touch is claimed after 10 px of mostly horizontal movement. Mostly vertical movement is left to the browser, which keeps scrolling the month grid and the time grid (`touch-action: pan-y pinch-zoom` on the calendar body, set on every element because the property doesn't carry past scroll containers).
+    - Touches that start within 24 px of the screen's left or right edge (the system back gesture), on an entry that can be dragged to another day, or in a text field don't swipe. The click the browser sends when the finger lifts is stopped, so a swipe never opens a new entry or selects a day.
+  - **Animation.** The new period slides in from the side it comes from in 180 ms, and the old one slides out the other way. The ‹ › buttons, arrow keys, Today and swipes all slide, in the direction of the date they go to. A view change swaps at once, and so does everything with `prefers-reduced-motion`.
+  - Swipes are ignored while the entry editor, the command palette, a day's "+N more" list or a calendar's menu is open. A swipe closes an open details card.
+  - The gesture logic is in `lib/gestures.ts` (pure functions), the listeners in `hooks/useSwipeNavigation.ts`, and the slide in `CalendarPage` (each period is a pane under framer-motion's `AnimatePresence`). The click-swallowing helper the details card used moved to `lib/clicks.ts`.
+- **Compatibility:** none. The sidebar mini-month doesn't take swipes.
+- **Upstreamable:** yes.
+- **Tests:**
+  - `lib/gestures.test.ts`: a horizontal sequence fires once, a momentum tail after firing doesn't fire again, vertical and vertical-then-diagonal sequences never fire, the threshold, line and page delta modes, a new gesture after a pause, pinch-zoom ignored, finger decisions at the distance and speed limits, vertical movement, and edge starts.
+  - Checked in headless Brave:
+    - synthetic and real horizontal wheel input move the month by exactly one in each direction, with every event of the gesture prevented; vertical input never navigates, and a real vertical wheel scrolls the week's time grid;
+    - the ‹ › buttons slide; no swipe while the editor is open; dragging an entry to another day still works;
+    - at 390 px with touch: finger swipes move the week and the month both ways, the lift doesn't open a new entry, an edge swipe does nothing, a short slow drag snaps back, the week follows the finger mid-drag, a vertical pan scrolls the time grid, and there's no horizontal scroll;
+    - with reduced motion, the new period appears at once.
